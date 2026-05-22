@@ -34,10 +34,11 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
 
   if (category === 'book') {
     const res = await fetch(
-      `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}`
+      `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=20&fields=key,title,cover_i`
     )
+    if (!res.ok) return []
     const data = await res.json()
-    return (data.docs ?? []).slice(0, 20).map((d: any) => ({
+    return (data.docs ?? []).map((d: any) => ({
       id: d.key ?? '',
       title: d.title ?? 'Unknown',
       image: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : null,

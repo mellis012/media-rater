@@ -46,23 +46,43 @@ export function useRatings() {
   }, [])
 
   const fetchPublicRatings = useCallback(async (username?: string): Promise<Rating[]> => {
-    let query = supabase
-      .from('ratings')
-      .select('*, profiles(username)')
-      .order('updated_at', { ascending: false })
-
+    // Step 1: resolve optional username → user_id filter
+    let userIdFilter: string | undefined
     if (username) {
       const { data: profile } = await supabase
         .from('profiles')
         .select('id')
         .eq('username', username)
-        .single()
-      if (profile) query = query.eq('user_id', profile.id)
+        .maybeSingle()
+      if (!profile) return []
+      userIdFilter = profile.id
     }
 
-    const { data, error } = await query
+    // Step 2: fetch ratings (no join — PostgREST needs a direct FK to auto-join)
+    let query = supabase
+      .from('ratings')
+      .select('*')
+      .order('updated_at', { ascending: false })
+
+    if (userIdFilter) query = query.eq('user_id', userIdFilter)
+
+    const { data: ratingsData, error } = await query
     if (error) throw error
-    return data ?? []
+    if (!ratingsData?.length) return []
+
+    // Step 3: fetch usernames for all unique user_ids and attach them
+    const uniqueIds = [...new Set(ratingsData.map(r => r.user_id))]
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', uniqueIds)
+
+    const profileMap = new Map((profilesData ?? []).map(p => [p.id, p.username]))
+
+    return ratingsData.map(r => ({
+      ...r,
+      profiles: profileMap.has(r.user_id) ? { username: profileMap.get(r.user_id)! } : undefined,
+    }))
   }, [])
 
   const getUserRatingMap = useCallback(async (userId: string): Promise<Map<string, number>> => {
