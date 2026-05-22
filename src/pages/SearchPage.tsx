@@ -52,49 +52,70 @@ export default function SearchPage() {
     setRatingMap(prev => new Map(prev).set(`${item.type}:${item.id}`, rating))
   }
 
+  const hasResults = results.length > 0
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-1">Search</h1>
-        <p className="text-slate-400">Find movies, shows, books, games, and music to rate.</p>
-      </div>
+    <div className="max-w-7xl mx-auto px-4">
+      {/* Hero — collapses once results appear */}
+      {!hasResults && (
+        <div className="pt-16 pb-10 text-center">
+          <h1 className="text-5xl font-bold bg-gradient-to-r from-purple-400 via-pink-300 to-blue-400 bg-clip-text text-transparent mb-3 leading-tight">
+            Rate everything.
+          </h1>
+          <p className="text-slate-400 text-lg mb-8">
+            Movies, TV, books, games, music — all in one place.
+          </p>
+          <div className="max-w-xl mx-auto">
+            <SearchBar onSearch={handleSearch} loading={loading} />
+          </div>
+        </div>
+      )}
 
-      <div className="mb-6">
-        <SearchBar onSearch={handleSearch} loading={loading} />
-      </div>
+      {/* Compact search bar when results are visible */}
+      {hasResults && (
+        <div className="py-4">
+          <SearchBar onSearch={handleSearch} loading={loading} />
+        </div>
+      )}
 
+      {/* Drill breadcrumb */}
       {drillParent && (
-        <div className="mb-4 flex items-center gap-2">
+        <div className="flex items-center gap-2 mb-4 text-sm">
           <button
             onClick={() => { setDrillParent(null); setResults([]) }}
-            className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
+            className="text-purple-400 hover:text-purple-300 transition-colors"
           >
             ← Back
           </button>
-          <span className="text-slate-500">/</span>
-          <span className="text-sm text-slate-300">{drillParent.title}</span>
+          <span className="text-slate-700">/</span>
+          <span className="text-slate-400 truncate">{drillParent.title}</span>
         </div>
       )}
 
-      {results.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {results.map(item => (
-            <ResultCard
-              key={item.id}
-              item={item}
-              userId={user?.id ?? null}
-              existingRating={ratingMap.get(`${item.type}:${item.id}`)}
-              onRate={handleRate}
-              onDrill={handleDrill}
-              parentImage={drillParent?.image ?? null}
-            />
-          ))}
+      {/* Results grid */}
+      {hasResults && (
+        <div className="pb-10">
+          <p className="text-xs text-slate-600 mb-3">{results.length} results</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            {results.map(item => (
+              <ResultCard
+                key={item.id}
+                item={item}
+                userId={user?.id ?? null}
+                existingRating={ratingMap.get(`${item.type}:${item.id}`)}
+                onRate={handleRate}
+                onDrill={handleDrill}
+                parentImage={drillParent?.image ?? null}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      {!loading && results.length === 0 && (
-        <div className="text-center py-24 text-slate-600">
-          <p className="text-lg">Search for something to get started.</p>
+      {/* Empty state (after a search returned nothing) */}
+      {!loading && !hasResults && drillParent && (
+        <div className="text-center py-16 text-slate-600">
+          <p>No results found.</p>
         </div>
       )}
     </div>

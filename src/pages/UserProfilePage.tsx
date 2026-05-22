@@ -62,10 +62,8 @@ export default function UserProfilePage() {
     () => filter === 'all' ? ratings : ratings.filter(r => r.category === filter),
     [ratings, filter]
   )
-
   const displayed = useMemo(() => sortRatings(filtered, sort), [filtered, sort])
 
-  // Average reflects the active category filter
   const avg = filtered.length
     ? (filtered.reduce((s, r) => s + r.rating, 0) / filtered.length).toFixed(1)
     : '—'
@@ -76,38 +74,54 @@ export default function UserProfilePage() {
 
   if (notFound) {
     return (
-      <div className="flex items-center justify-center h-64 text-slate-500">
-        <p>User not found or no ratings yet.</p>
+      <div className="flex flex-col items-center justify-center h-64 gap-2">
+        <p className="text-slate-500">User not found or no ratings yet.</p>
       </div>
     )
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-10">
       {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-3 mb-1">
-          <div className="w-10 h-10 rounded-full bg-purple-600/30 border border-purple-500/40 flex items-center justify-center text-purple-300 font-bold text-lg shrink-0">
+      <div className="mb-8">
+        <div className="flex items-center gap-3 mb-3">
+          {/* Avatar */}
+          <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-600/40 to-pink-600/40 border border-purple-500/30 flex items-center justify-center text-purple-200 font-bold text-xl shadow-lg shadow-purple-500/10 shrink-0">
             {username?.[0]?.toUpperCase()}
           </div>
-          <h1 className="text-3xl font-bold text-white">@{username}</h1>
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+            @{username}
+          </h1>
         </div>
-        <p className="text-slate-400 pl-13">
-          {filtered.length} rated · avg <span className="text-white font-semibold">{avg}</span>/10
-        </p>
+        {/* Stat chips */}
+        <div className="flex gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 bg-white/[0.06] border border-white/10 rounded-full px-3 py-1">
+            <span className="text-slate-400 text-xs">Rated</span>
+            <span className="text-white text-sm font-bold">{filtered.length}</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-white/[0.06] border border-white/10 rounded-full px-3 py-1">
+            <span className="text-slate-400 text-xs">Avg</span>
+            <span className="text-white text-sm font-bold">{avg}<span className="text-slate-500 font-normal">/10</span></span>
+          </div>
+          {filter !== 'all' && (
+            <div className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full px-3 py-1">
+              <span className="text-purple-300 text-xs capitalize">{filter}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Controls */}
-      <div className="flex flex-wrap gap-3 items-center mb-6">
+      <div className="flex flex-wrap gap-2 items-center mb-5">
         <div className="flex gap-1.5 flex-wrap">
           {FILTER_OPTIONS.map(opt => (
             <button
               key={opt.value}
               onClick={() => setFilter(opt.value)}
-              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+              className={`px-3 py-1.5 rounded-full text-sm transition-all ${
                 filter === opt.value
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white'
+                  ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
+                  : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white border border-white/[0.06]'
               }`}
             >
               {opt.label}
@@ -121,18 +135,19 @@ export default function UserProfilePage() {
             className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-slate-300 text-sm focus:outline-none focus:border-purple-500 transition-colors"
           >
             {SORT_OPTIONS.map(o => (
-              <option key={o.value} value={o.value} className="bg-[#1a1a2e]">{o.label}</option>
+              <option key={o.value} value={o.value} className="bg-[#111118]">{o.label}</option>
             ))}
           </select>
         </div>
       </div>
 
+      {/* List */}
       {displayed.length === 0 ? (
         <div className="text-center py-24 text-slate-600">
           <p>No ratings in this category yet.</p>
         </div>
       ) : (
-        <div className="flex flex-col divide-y divide-white/5">
+        <div className="flex flex-col">
           {displayed.map((r, i) => (
             <RatingListRow key={r.id} rating={r} rank={i + 1} />
           ))}
