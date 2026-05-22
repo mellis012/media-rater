@@ -21,10 +21,13 @@ export default function SetupProfilePage() {
     setError('')
     setSaving(true)
     try {
+      // Use upsert: the trigger may have already created a row with id set
+      // and username null, so INSERT would fail on the primary key.
       const { error: err } = await supabase
         .from('profiles')
-        .insert({ id: user!.id, username })
+        .upsert({ id: user!.id, username }, { onConflict: 'id' })
       if (err) {
+        // 23505 here can only mean the username unique constraint fired
         if (err.code === '23505') setError('That username is taken. Try another.')
         else setError(err.message)
         return
