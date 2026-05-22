@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 
 function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
-  const { pathname, hash } = useLocation()
+  const { hash } = useLocation()
   const current = hash.replace('#', '') || '/'
   const active = current === to || (to !== '/' && current.startsWith(to))
   return (
