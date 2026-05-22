@@ -36,3 +36,27 @@ CREATE POLICY "ratings_select" ON ratings FOR SELECT USING (true);
 CREATE POLICY "ratings_insert" ON ratings FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "ratings_update" ON ratings FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "ratings_delete" ON ratings FOR DELETE USING (auth.uid() = user_id);
+
+-- ============================================================
+-- Trigger: auto-create a profile stub when a new user signs up
+-- Runs as SECURITY DEFINER so it bypasses RLS even when the
+-- user isn't fully authenticated yet (e.g. email confirmation).
+-- The username is left NULL here; the user sets it via the app.
+-- ============================================================
+
+-- Allow username to be temporarily null for trigger-created rows
+ALTER TABLE profiles ALTER COLUMN username DROP NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  INSERT INTO public.profiles (id)
+  VALUES (NEW.id)
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();

@@ -24,6 +24,6 @@ export interface Rating {
 
 export interface Profile {
   id: string
-  username: string
+  username: string | null
   created_at: string
 }

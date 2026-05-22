@@ -5,6 +5,7 @@ import MyRatingsPage from './pages/MyRatingsPage'
 import ExplorePage from './pages/ExplorePage'
 import UserProfilePage from './pages/UserProfilePage'
 import AuthPage from './pages/AuthPage'
+import SetupProfilePage from './pages/SetupProfilePage'
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/my-ratings" element={<MyRatingsPage />} />
             <Route path="/user/:username" element={<UserProfilePage />} />
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/setup-profile" element={<SetupProfilePage />} />
           </Routes>
         </main>
       </div>
