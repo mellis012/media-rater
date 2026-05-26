@@ -26,14 +26,15 @@ Deno.serve(async (req: Request) => {
 
     const data = await res.json()
 
+    // Always return 200 — errors from Hardcover come back as JSON
     return new Response(JSON.stringify(data), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: res.status,
+      status: 200,
     })
   } catch (err) {
-    return new Response(JSON.stringify({ error: String(err) }), {
+    return new Response(JSON.stringify({ errors: [{ message: String(err) }] }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
+      status: 200,
     })
   }
 })
