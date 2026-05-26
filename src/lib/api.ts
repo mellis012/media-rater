@@ -122,11 +122,12 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     // Run title-focused search AND general search in parallel.
     // intitle: results go first so title matches are always prioritised;
     // the general search fills in additional results and boosts the count.
+    const empty = { items: [] as any[] }
     const [titleData, generalData] = await Promise.all([
       fetch(`https://www.googleapis.com/books/v1/volumes?${makeParams(`intitle:${q}`)}`)
-        .then(r => r.ok ? r.json() : {}).catch(() => ({})),
+        .then(r => r.ok ? r.json() : empty).catch(() => empty),
       fetch(`https://www.googleapis.com/books/v1/volumes?${makeParams(q)}`)
-        .then(r => r.ok ? r.json() : {}).catch(() => ({})),
+        .then(r => r.ok ? r.json() : empty).catch(() => empty),
     ])
 
     // Deduplicate by normalised title + first author across both result sets.
