@@ -27,10 +27,11 @@ async function hardcoverQuery<T = any>(
       },
       body: JSON.stringify({ query, variables }),
     })
-    if (!res.ok) return null
     const json = await res.json()
+    console.log('[hardcover] status:', res.status, 'response:', JSON.stringify(json).slice(0, 300))
     return json.data ?? null
-  } catch {
+  } catch (e) {
+    console.error('[hardcover] fetch error:', e)
     return null
   }
 }
