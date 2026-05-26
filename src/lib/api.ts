@@ -112,17 +112,27 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
   }
 
   if (category === 'book') {
-    const params = new URLSearchParams({ q, maxResults: '40', printType: 'books', orderBy: 'relevance' })
-    if (GOOGLE_BOOKS_KEY) params.set('key', GOOGLE_BOOKS_KEY)
-    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?${params}`)
-    if (!res.ok) return []
-    const data = await res.json()
+    // Build params helper
+    const makeParams = (query: string) => {
+      const p = new URLSearchParams({ q: query, maxResults: '40', printType: 'books', orderBy: 'relevance' })
+      if (GOOGLE_BOOKS_KEY) p.set('key', GOOGLE_BOOKS_KEY)
+      return p
+    }
 
-    // Deduplicate by normalised title + first author so different editions of
-    // the same story collapse into one result.
+    // Run title-focused search AND general search in parallel.
+    // intitle: results go first so title matches are always prioritised;
+    // the general search fills in additional results and boosts the count.
+    const [titleData, generalData] = await Promise.all([
+      fetch(`https://www.googleapis.com/books/v1/volumes?${makeParams(`intitle:${q}`)}`)
+        .then(r => r.ok ? r.json() : {}).catch(() => ({})),
+      fetch(`https://www.googleapis.com/books/v1/volumes?${makeParams(q)}`)
+        .then(r => r.ok ? r.json() : {}).catch(() => ({})),
+    ])
+
+    // Deduplicate by normalised title + first author across both result sets.
     const seen = new Set<string>()
     const items: MediaItem[] = []
-    for (const item of data.items ?? []) {
+    for (const item of [...(titleData.items ?? []), ...(generalData.items ?? [])]) {
       const info = item.volumeInfo ?? {}
       const title: string = (info.title ?? 'Unknown').trim()
       const author: string = (info.authors?.[0] ?? '').trim()
