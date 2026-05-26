@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import SearchBar from '../components/search/SearchBar'
 import ResultCard from '../components/search/ResultCard'
-import { searchMedia, getTvSeasons, getDiscography } from '../lib/api'
+import { searchMedia, getTvSeasons, getDiscography, getBookVolumes } from '../lib/api'
 import { useAuth } from '../hooks/useAuth'
 import { useRatings } from '../hooks/useRatings'
 import type { MediaItem, MediaCategory } from '../types'
@@ -38,6 +38,7 @@ export default function SearchPage() {
       let children: MediaItem[] = []
       if (item.type === 'tv') children = await getTvSeasons(item.id)
       else if (item.type === 'artist') children = await getDiscography(item.id)
+      else if (item.type === 'book-series') children = await getBookVolumes(item)
       setResults(children)
     } catch {
       setResults([])

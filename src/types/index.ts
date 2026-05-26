@@ -1,4 +1,4 @@
-export type MediaCategory = 'movie' | 'tv' | 'book' | 'game' | 'artist' | 'tv-season' | 'album'
+export type MediaCategory = 'movie' | 'tv' | 'book' | 'book-series' | 'game' | 'artist' | 'tv-season' | 'album'
 
 export interface MediaItem {
   id: string

@@ -10,7 +10,13 @@ interface Props {
   parentImage?: string | null
 }
 
-const PARENT_TYPES: MediaCategory[] = ['tv', 'artist']
+const PARENT_TYPES: MediaCategory[] = ['tv', 'artist', 'book-series']
+
+const TYPE_LABELS: Partial<Record<MediaCategory, string>> = {
+  'tv': 'tv show',
+  'tv-season': 'tv season',
+  'book-series': 'series',
+}
 
 export default function ResultCard({ item, userId, existingRating, onRate, onDrill, parentImage }: Props) {
   const [rating, setRating] = useState(existingRating ?? 7)
@@ -65,7 +71,7 @@ export default function ResultCard({ item, userId, existingRating, onRate, onDri
         <div>
           <p className="text-sm font-semibold text-white line-clamp-2 leading-tight text-[13px]">{item.title}</p>
           <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded-full bg-white/8 text-slate-500 uppercase tracking-wider border border-white/5">
-            {item.type}
+            {TYPE_LABELS[item.type] ?? item.type}
           </span>
         </div>
 
@@ -74,7 +80,7 @@ export default function ResultCard({ item, userId, existingRating, onRate, onDri
             onClick={() => onDrill?.(item)}
             className="mt-auto text-xs px-2.5 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/20 transition-colors font-medium"
           >
-            {item.type === 'tv' ? 'View Seasons →' : 'View Discography →'}
+            {item.type === 'tv' ? 'View Seasons →' : item.type === 'book-series' ? 'View Books →' : 'View Discography →'}
           </button>
         ) : userId ? (
           <div className="mt-auto space-y-1.5">
