@@ -34,6 +34,7 @@ jobs:
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_TMDB_KEY: ${{ secrets.VITE_TMDB_KEY }}
           VITE_RAWG_KEY: ${{ secrets.VITE_RAWG_KEY }}
+          VITE_GOOGLE_BOOKS_KEY: ${{ secrets.VITE_GOOGLE_BOOKS_KEY }}
 
       - uses: actions/upload-pages-artifact@v3
         with:
