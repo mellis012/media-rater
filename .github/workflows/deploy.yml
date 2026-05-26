@@ -35,7 +35,6 @@ jobs:
           VITE_TMDB_KEY: ${{ secrets.VITE_TMDB_KEY }}
           VITE_RAWG_KEY: ${{ secrets.VITE_RAWG_KEY }}
           VITE_GOOGLE_BOOKS_KEY: ${{ secrets.VITE_GOOGLE_BOOKS_KEY }}
-          VITE_HARDCOVER_KEY: ${{ secrets.VITE_HARDCOVER_KEY }}
 
       - uses: actions/upload-pages-artifact@v3
         with:

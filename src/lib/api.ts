@@ -3,7 +3,8 @@ import type { MediaItem, Rating } from '../types'
 const TMDB_KEY = import.meta.env.VITE_TMDB_KEY as string
 const RAWG_KEY = import.meta.env.VITE_RAWG_KEY as string
 const GOOGLE_BOOKS_KEY = import.meta.env.VITE_GOOGLE_BOOKS_KEY as string // kept for legacy gb- ratings
-const HARDCOVER_KEY = import.meta.env.VITE_HARDCOVER_KEY as string
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 function yearFrom(dateStr?: string | null): number | null {
   if (!dateStr) return null
@@ -11,16 +12,17 @@ function yearFrom(dateStr?: string | null): number | null {
   return isNaN(y) ? null : y
 }
 
-/** Execute a Hardcover GraphQL query. Returns data or null on any error. */
+/** Execute a Hardcover GraphQL query via Supabase Edge Function proxy. Returns data or null on any error. */
 async function hardcoverQuery<T = any>(
   query: string,
   variables?: Record<string, any>
 ): Promise<T | null> {
   try {
-    const res = await fetch('https://api.hardcover.app/v1/graphql', {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/hardcover-proxy`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${HARDCOVER_KEY}`,
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query, variables }),
