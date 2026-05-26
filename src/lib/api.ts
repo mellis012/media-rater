@@ -2,6 +2,7 @@ import type { MediaItem, Rating } from '../types'
 
 const TMDB_KEY = import.meta.env.VITE_TMDB_KEY as string
 const RAWG_KEY = import.meta.env.VITE_RAWG_KEY as string
+const GOOGLE_BOOKS_KEY = import.meta.env.VITE_GOOGLE_BOOKS_KEY as string
 
 function yearFrom(dateStr?: string | null): number | null {
   if (!dateStr) return null
@@ -35,8 +36,9 @@ export async function fetchReleaseYear(r: Rating): Promise<number | null> {
       if (r.item_id.startsWith('gb-')) {
         // Google Books ID
         const volumeId = r.item_id.slice(3)
+        const keyParam = GOOGLE_BOOKS_KEY ? `?key=${GOOGLE_BOOKS_KEY}` : ''
         const data = await fetch(
-          `https://www.googleapis.com/books/v1/volumes/${volumeId}`
+          `https://www.googleapis.com/books/v1/volumes/${volumeId}${keyParam}`
         ).then(res => res.json()).catch(() => ({}))
         const dateStr: string = data.volumeInfo?.publishedDate ?? ''
         const y = parseInt(dateStr.split('-')[0], 10)
@@ -110,9 +112,9 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
   }
 
   if (category === 'book') {
-    const res = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=40&printType=books&orderBy=relevance`
-    )
+    const params = new URLSearchParams({ q, maxResults: '40', printType: 'books', orderBy: 'relevance' })
+    if (GOOGLE_BOOKS_KEY) params.set('key', GOOGLE_BOOKS_KEY)
+    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?${params}`)
     if (!res.ok) return []
     const data = await res.json()
 
