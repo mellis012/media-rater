@@ -48,7 +48,7 @@ export default function SearchPage() {
 
   async function handleRate(item: MediaItem, rating: number, parentImage?: string | null) {
     if (!user) return
-    await saveRating(user.id, item.type as MediaCategory, item.id, item.title, rating, item.image, parentImage ?? null)
+    await saveRating(user.id, item.type as MediaCategory, item.id, item.title, rating, item.image, parentImage ?? null, item.release_year ?? null)
     setRatingMap(prev => new Map(prev).set(`${item.type}:${item.id}`, rating))
   }
 

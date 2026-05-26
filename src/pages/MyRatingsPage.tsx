@@ -3,54 +3,35 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useRatings } from '../hooks/useRatings'
 import RatingListRow from '../components/ratings/RatingListRow'
+import { sortRatings, SORT_OPTIONS, type SortKey } from '../lib/sort'
 import type { Rating, MediaCategory } from '../types'
 
 const FILTER_OPTIONS: { value: 'all' | MediaCategory; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'movie', label: 'Movies' },
+  { value: 'all',       label: 'All' },
+  { value: 'movie',     label: 'Movies' },
   { value: 'tv-season', label: 'TV Seasons' },
-  { value: 'book', label: 'Books' },
-  { value: 'game', label: 'Games' },
-  { value: 'album', label: 'Albums' },
+  { value: 'book',      label: 'Books' },
+  { value: 'game',      label: 'Games' },
+  { value: 'album',     label: 'Albums' },
 ]
-
-type SortKey = 'rating_desc' | 'rating_asc' | 'title_asc' | 'title_desc' | 'date_desc' | 'date_asc'
-
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: 'rating_desc', label: 'Rating: High → Low' },
-  { value: 'rating_asc',  label: 'Rating: Low → High' },
-  { value: 'title_asc',   label: 'Title: A → Z' },
-  { value: 'title_desc',  label: 'Title: Z → A' },
-  { value: 'date_desc',   label: 'Date Added: Newest' },
-  { value: 'date_asc',    label: 'Date Added: Oldest' },
-]
-
-function sortRatings(ratings: Rating[], sort: SortKey): Rating[] {
-  return [...ratings].sort((a, b) => {
-    switch (sort) {
-      case 'rating_desc': return b.rating - a.rating
-      case 'rating_asc':  return a.rating - b.rating
-      case 'title_asc':   return a.title.localeCompare(b.title)
-      case 'title_desc':  return b.title.localeCompare(a.title)
-      case 'date_desc':   return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      case 'date_asc':    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-    }
-  })
-}
 
 export default function MyRatingsPage() {
   const { user, loading: authLoading } = useAuth()
-  const { fetchUserRatings, saveRating } = useRatings()
+  const { fetchUserRatings, saveRating, deleteRating } = useRatings()
   const navigate = useNavigate()
   const [ratings, setRatings] = useState<Rating[]>([])
   const [filter, setFilter] = useState<'all' | MediaCategory>('all')
-  const [sort, setSort] = useState<SortKey>('date_desc')
+  const [sort, setSort] = useState<SortKey>('rating_desc')
   const [loading, setLoading] = useState(true)
 
-  // Inline edit state
+  // Edit state
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState(5)
   const [editSaving, setEditSaving] = useState(false)
+
+  // Delete state
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteSaving, setDeleteSaving] = useState(false)
 
   useEffect(() => {
     if (!authLoading && !user) navigate('/auth')
@@ -74,13 +55,23 @@ export default function MyRatingsPage() {
     ? (filtered.reduce((s, r) => s + r.rating, 0) / filtered.length).toFixed(1)
     : '—'
 
+  function closeAll() { setEditingId(null); setDeletingId(null) }
+
   async function handleEditSave(r: Rating) {
     if (!user) return
     setEditSaving(true)
-    await saveRating(user.id, r.category, r.item_id, r.title, editValue, r.image, r.parent_image)
+    await saveRating(user.id, r.category, r.item_id, r.title, editValue, r.image, r.parent_image, r.release_year ?? null)
     setRatings(prev => prev.map(x => x.id === r.id ? { ...x, rating: editValue } : x))
     setEditingId(null)
     setEditSaving(false)
+  }
+
+  async function handleDeleteConfirm(r: Rating) {
+    setDeleteSaving(true)
+    await deleteRating(r.id)
+    setRatings(prev => prev.filter(x => x.id !== r.id))
+    setDeletingId(null)
+    setDeleteSaving(false)
   }
 
   if (authLoading || loading) {
@@ -94,7 +85,6 @@ export default function MyRatingsPage() {
         <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent mb-3">
           My Ratings
         </h1>
-        {/* Stat chips */}
         <div className="flex gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 bg-white/[0.06] border border-white/10 rounded-full px-3 py-1">
             <span className="text-slate-400 text-xs">Rated</span>
@@ -116,25 +106,19 @@ export default function MyRatingsPage() {
       <div className="flex flex-wrap gap-2 items-center mb-5">
         <div className="flex gap-1.5 flex-wrap">
           {FILTER_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => { setFilter(opt.value); setEditingId(null) }}
+            <button key={opt.value} onClick={() => { setFilter(opt.value); closeAll() }}
               className={`px-3 py-1.5 rounded-full text-sm transition-all ${
                 filter === opt.value
                   ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
                   : 'bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white border border-white/[0.06]'
-              }`}
-            >
+              }`}>
               {opt.label}
             </button>
           ))}
         </div>
         <div className="ml-auto">
-          <select
-            value={sort}
-            onChange={e => { setSort(e.target.value as SortKey); setEditingId(null) }}
-            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-slate-300 text-sm focus:outline-none focus:border-purple-500 transition-colors"
-          >
+          <select value={sort} onChange={e => { setSort(e.target.value as SortKey); closeAll() }}
+            className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-slate-300 text-sm focus:outline-none focus:border-purple-500 transition-colors">
             {SORT_OPTIONS.map(o => (
               <option key={o.value} value={o.value} className="bg-[#111118]">{o.label}</option>
             ))}
@@ -161,10 +145,15 @@ export default function MyRatingsPage() {
               isEditing={editingId === r.id}
               editValue={editingId === r.id ? editValue : undefined}
               editSaving={editSaving}
-              onEditStart={(current) => { setEditingId(r.id); setEditValue(current) }}
+              onEditStart={(current) => { setDeletingId(null); setEditingId(r.id); setEditValue(current) }}
               onEditChange={setEditValue}
               onEditSave={() => handleEditSave(r)}
               onEditCancel={() => setEditingId(null)}
+              isConfirmingDelete={deletingId === r.id}
+              deleteSaving={deleteSaving}
+              onDeleteStart={() => { setEditingId(null); setDeletingId(r.id) }}
+              onDeleteConfirm={() => handleDeleteConfirm(r)}
+              onDeleteCancel={() => setDeletingId(null)}
             />
           ))}
         </div>

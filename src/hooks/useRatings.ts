@@ -12,7 +12,8 @@ export function useRatings() {
     title: string,
     rating: number,
     image: string | null,
-    parentImage: string | null
+    parentImage: string | null,
+    releaseYear: number | null = null
   ) => {
     setSaving(true)
     try {
@@ -25,6 +26,7 @@ export function useRatings() {
           rating,
           image,
           parent_image: parentImage,
+          release_year: releaseYear,
           updated_at: new Date().toISOString(),
         },
         { onConflict: 'user_id,category,item_id' }
@@ -35,18 +37,22 @@ export function useRatings() {
     }
   }, [])
 
+  const deleteRating = useCallback(async (ratingId: string) => {
+    const { error } = await supabase.from('ratings').delete().eq('id', ratingId)
+    if (error) throw error
+  }, [])
+
   const fetchUserRatings = useCallback(async (userId: string): Promise<Rating[]> => {
     const { data, error } = await supabase
       .from('ratings')
       .select('*')
       .eq('user_id', userId)
-      .order('updated_at', { ascending: false })
+      .order('rating', { ascending: false })
     if (error) throw error
     return data ?? []
   }, [])
 
   const fetchPublicRatings = useCallback(async (username?: string): Promise<Rating[]> => {
-    // Step 1: resolve optional username → user_id filter
     let userIdFilter: string | undefined
     if (username) {
       const { data: profile } = await supabase
@@ -58,7 +64,6 @@ export function useRatings() {
       userIdFilter = profile.id
     }
 
-    // Step 2: fetch ratings (no join — PostgREST needs a direct FK to auto-join)
     let query = supabase
       .from('ratings')
       .select('*')
@@ -70,7 +75,6 @@ export function useRatings() {
     if (error) throw error
     if (!ratingsData?.length) return []
 
-    // Step 3: fetch usernames for all unique user_ids and attach them
     const uniqueIds = [...new Set(ratingsData.map(r => r.user_id))]
     const { data: profilesData } = await supabase
       .from('profiles')
@@ -97,5 +101,5 @@ export function useRatings() {
     return map
   }, [])
 
-  return { saving, saveRating, fetchUserRatings, fetchPublicRatings, getUserRatingMap }
+  return { saving, saveRating, deleteRating, fetchUserRatings, fetchPublicRatings, getUserRatingMap }
 }

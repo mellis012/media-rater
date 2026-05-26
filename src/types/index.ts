@@ -6,6 +6,7 @@ export interface MediaItem {
   image: string | null
   type: MediaCategory
   parentImage?: string | null
+  release_year?: number | null
 }
 
 export interface Rating {
@@ -17,6 +18,7 @@ export interface Rating {
   rating: number
   image: string | null
   parent_image: string | null
+  release_year?: number | null
   created_at: string
   updated_at: string
   profiles?: { username: string }

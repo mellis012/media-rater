@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS ratings (
   rating NUMERIC(3,1) NOT NULL CHECK (rating >= 0 AND rating <= 10),
   image TEXT,
   parent_image TEXT,
+  release_year INT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, category, item_id)

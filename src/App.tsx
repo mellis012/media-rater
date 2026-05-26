@@ -6,6 +6,7 @@ import ExplorePage from './pages/ExplorePage'
 import UserProfilePage from './pages/UserProfilePage'
 import AuthPage from './pages/AuthPage'
 import SetupProfilePage from './pages/SetupProfilePage'
+import AuthCallbackPage from './pages/AuthCallbackPage'
 
 export default function App() {
   return (
@@ -20,6 +21,9 @@ export default function App() {
             <Route path="/user/:username" element={<UserProfilePage />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/setup-profile" element={<SetupProfilePage />} />
+            {/* Catch-all: handles Supabase email-verification redirects
+                which put tokens in the hash (#access_token=…) instead of a path */}
+            <Route path="*" element={<AuthCallbackPage />} />
           </Routes>
         </main>
       </div>
