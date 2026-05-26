@@ -32,14 +32,24 @@ export async function fetchReleaseYear(r: Rating): Promise<number | null> {
     }
 
     if (r.category === 'book') {
-      // item_id is an OpenLibrary key like "/works/OL12345W"
-      const data = await fetch(
-        `https://openlibrary.org${r.item_id}.json`
-      ).then(res => res.json()).catch(() => ({}))
-      // first_publish_date can be "1982", "April 1982", etc.
-      const raw: string = data.first_publish_date ?? ''
-      const match = raw.match(/\d{4}/)
-      return match ? parseInt(match[0], 10) : null
+      if (r.item_id.startsWith('gb-')) {
+        // Google Books ID
+        const volumeId = r.item_id.slice(3)
+        const data = await fetch(
+          `https://www.googleapis.com/books/v1/volumes/${volumeId}`
+        ).then(res => res.json()).catch(() => ({}))
+        const dateStr: string = data.volumeInfo?.publishedDate ?? ''
+        const y = parseInt(dateStr.split('-')[0], 10)
+        return isNaN(y) ? null : y
+      } else {
+        // Legacy OpenLibrary key like "/works/OL12345W"
+        const data = await fetch(
+          `https://openlibrary.org${r.item_id}.json`
+        ).then(res => res.json()).catch(() => ({}))
+        const raw: string = data.first_publish_date ?? ''
+        const match = raw.match(/\d{4}/)
+        return match ? parseInt(match[0], 10) : null
+      }
     }
 
     if (r.category === 'game') {
@@ -101,17 +111,36 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
 
   if (category === 'book') {
     const res = await fetch(
-      `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=40&fields=key,title,cover_i,first_publish_year`
+      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=40&printType=books&orderBy=relevance`
     )
     if (!res.ok) return []
     const data = await res.json()
-    return (data.docs ?? []).map((d: any) => ({
-      id: d.key ?? '',
-      title: d.title ?? 'Unknown',
-      image: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg` : null,
-      type: 'book' as const,
-      release_year: d.first_publish_year ?? null,
-    }))
+
+    // Deduplicate by normalised title + first author so different editions of
+    // the same story collapse into one result.
+    const seen = new Set<string>()
+    const items: MediaItem[] = []
+    for (const item of data.items ?? []) {
+      const info = item.volumeInfo ?? {}
+      const title: string = (info.title ?? 'Unknown').trim()
+      const author: string = (info.authors?.[0] ?? '').trim()
+      const dedupeKey = `${title.toLowerCase()}||${author.toLowerCase()}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+
+      const thumb: string | undefined =
+        info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail
+      items.push({
+        id: `gb-${item.id}`,
+        title: author ? `${title} — ${author}` : title,
+        image: thumb ? thumb.replace('http:', 'https:') : null,
+        type: 'book' as const,
+        release_year: info.publishedDate
+          ? parseInt((info.publishedDate as string).split('-')[0], 10) || null
+          : null,
+      })
+    }
+    return items
   }
 
   if (category === 'game') {
