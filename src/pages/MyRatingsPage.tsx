@@ -4,6 +4,8 @@ import { useAuth } from '../hooks/useAuth'
 import { useRatings } from '../hooks/useRatings'
 import RatingListRow from '../components/ratings/RatingListRow'
 import { sortRatings, SORT_OPTIONS, type SortKey } from '../lib/sort'
+import { fetchReleaseYear } from '../lib/api'
+import { supabase } from '../lib/supabase'
 import type { Rating, MediaCategory } from '../types'
 
 const FILTER_OPTIONS: { value: 'all' | MediaCategory; label: string }[] = [
@@ -32,6 +34,10 @@ export default function MyRatingsPage() {
   // Delete state
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
+
+  // Sync years state
+  const [syncingYears, setSyncingYears] = useState(false)
+  const [syncProgress, setSyncProgress] = useState<{ done: number; total: number } | null>(null)
 
   useEffect(() => {
     if (!authLoading && !user) navigate('/auth')
@@ -64,6 +70,25 @@ export default function MyRatingsPage() {
     setRatings(prev => prev.map(x => x.id === r.id ? { ...x, rating: editValue } : x))
     setEditingId(null)
     setEditSaving(false)
+  }
+
+  async function handleSyncYears() {
+    const missing = ratings.filter(r => r.release_year == null)
+    if (missing.length === 0) return
+    setSyncingYears(true)
+    setSyncProgress({ done: 0, total: missing.length })
+    let done = 0
+    for (const r of missing) {
+      const year = await fetchReleaseYear(r)
+      if (year !== null) {
+        await supabase.from('ratings').update({ release_year: year }).eq('id', r.id)
+        setRatings(prev => prev.map(x => x.id === r.id ? { ...x, release_year: year } : x))
+      }
+      done++
+      setSyncProgress({ done, total: missing.length })
+    }
+    setSyncingYears(false)
+    setSyncProgress(null)
   }
 
   async function handleDeleteConfirm(r: Rating) {
@@ -116,7 +141,19 @@ export default function MyRatingsPage() {
             </button>
           ))}
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {ratings.some(r => r.release_year == null) && (
+            <button
+              onClick={handleSyncYears}
+              disabled={syncingYears}
+              title="Fetch missing release years from external APIs"
+              className="px-3 py-1.5 rounded-lg text-sm bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {syncingYears && syncProgress
+                ? `Syncing ${syncProgress.done}/${syncProgress.total}…`
+                : '🗓 Sync years'}
+            </button>
+          )}
           <select value={sort} onChange={e => { setSort(e.target.value as SortKey); closeAll() }}
             className="px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg text-slate-300 text-sm focus:outline-none focus:border-purple-500 transition-colors">
             {SORT_OPTIONS.map(o => (

@@ -1,4 +1,4 @@
-import type { MediaItem } from '../types'
+import type { MediaItem, Rating } from '../types'
 
 const TMDB_KEY = import.meta.env.VITE_TMDB_KEY as string
 const RAWG_KEY = import.meta.env.VITE_RAWG_KEY as string
@@ -7,6 +7,62 @@ function yearFrom(dateStr?: string | null): number | null {
   if (!dateStr) return null
   const y = parseInt(dateStr.split('-')[0], 10)
   return isNaN(y) ? null : y
+}
+
+/**
+ * Look up the release year for a single rating via its source API.
+ * Returns null if the year can't be determined.
+ */
+export async function fetchReleaseYear(r: Rating): Promise<number | null> {
+  try {
+    if (r.category === 'movie') {
+      const data = await fetch(
+        `https://api.themoviedb.org/3/movie/${r.item_id}?api_key=${TMDB_KEY}`
+      ).then(res => res.json())
+      return yearFrom(data.release_date)
+    }
+
+    if (r.category === 'tv-season') {
+      // item_id format: "{showId}-season-{seasonNumber}"
+      const [showId, seasonNum] = r.item_id.split('-season-')
+      const data = await fetch(
+        `https://api.themoviedb.org/3/tv/${showId}/season/${seasonNum}?api_key=${TMDB_KEY}`
+      ).then(res => res.json())
+      return yearFrom(data.air_date)
+    }
+
+    if (r.category === 'book') {
+      // item_id is an OpenLibrary key like "/works/OL12345W"
+      const data = await fetch(
+        `https://openlibrary.org${r.item_id}.json`
+      ).then(res => res.json()).catch(() => ({}))
+      // first_publish_date can be "1982", "April 1982", etc.
+      const raw: string = data.first_publish_date ?? ''
+      const match = raw.match(/\d{4}/)
+      return match ? parseInt(match[0], 10) : null
+    }
+
+    if (r.category === 'game') {
+      const params = new URLSearchParams()
+      if (RAWG_KEY) params.set('key', RAWG_KEY)
+      const data = await fetch(
+        `https://api.rawg.io/api/games/${r.item_id}?${params}`
+      ).then(res => res.json())
+      return yearFrom(data.released)
+    }
+
+    if (r.category === 'album') {
+      const albumId = r.item_id.replace('album-', '')
+      const data = await fetch(
+        `https://www.theaudiodb.com/api/v1/json/2/album.php?m=${albumId}`
+      ).then(res => res.json()).catch(() => ({}))
+      const yr = data.album?.[0]?.intYearReleased
+      return yr ? parseInt(yr, 10) : null
+    }
+  } catch {
+    // Network error — skip this item
+  }
+  return null
 }
 
 export async function searchMedia(q: string, category: string): Promise<MediaItem[]> {
