@@ -18,14 +18,23 @@ function stripVolumeSuffix(title: string): string {
     .trim() || title
 }
 
-/** Extract 2 significant (non-stop-word) words from a title for use in search queries */
-function keyWordsFrom(title: string): string {
-  const stop = new Set(['a','an','the','and','or','of','in','on','at','for','to','is','it','by'])
-  return title
-    .split(/\s+/)
-    .filter(w => w.length > 2 && !stop.has(w.toLowerCase()))
-    .slice(0, 2)
-    .join(' ')
+/**
+ * Returns the longest common title prefix (≥ 2 words) shared by all titles,
+ * stripping trailing stop/connector words. Returns '' if no meaningful prefix.
+ */
+function commonTitlePrefix(titles: string[]): string {
+  if (titles.length < 2) return ''
+  const stop = new Set(['a','an','the','and','or','of','in','on','at','for','to','by'])
+  const wordArrays = titles.map(t => t.toLowerCase().split(/\s+/))
+  const first = wordArrays[0]
+  let prefixLen = 0
+  for (let i = 0; i < first.length; i++) {
+    if (wordArrays.every(w => w[i] === first[i])) prefixLen = i + 1
+    else break
+  }
+  while (prefixLen > 0 && stop.has(first[prefixLen - 1])) prefixLen--
+  if (prefixLen < 2) return ''
+  return titles[0].split(/\s+/).slice(0, prefixLen).join(' ')
 }
 
 /** Parse a Google Books volumeInfo.publishedDate string into a year integer */
@@ -41,14 +50,12 @@ function gbVolumeToItem(item: any): MediaItem {
   const title: string = (info.title ?? 'Unknown').trim()
   const author: string = (info.authors?.[0] ?? '').trim()
   const thumb: string | undefined = info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail
-  const volNum: string | undefined = info.seriesInfo?.bookDisplayNumber
   return {
     id: `gb-${item.id}`,
     title: author ? `${title} — ${author}` : title,
     image: thumb ? thumb.replace('http:', 'https:') : null,
     type: 'book' as const,
     release_year: yearFromGb(info),
-    ...(volNum ? { _volNum: parseFloat(volNum) } as any : {}),
   }
 }
 
@@ -161,7 +168,7 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     }
     const empty = { items: [] as any[] }
 
-    // Title-focused results first, general results as fill
+    // Title-focused + general search in parallel
     const [titleData, generalData] = await Promise.all([
       fetch(`https://www.googleapis.com/books/v1/volumes?${makeParams(`intitle:${q}`)}`)
         .then(r => r.ok ? r.json() : empty).catch(() => empty),
@@ -169,45 +176,58 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
         .then(r => r.ok ? r.json() : empty).catch(() => empty),
     ])
 
-    // Group by Google Books seriesId when available; fall back to solo book cards.
-    type SeriesEntry = { item: any; info: any; volNum: number; author: string; stripped: string }
-    const seriesMap = new Map<string, SeriesEntry>()
-    const soloBooks: MediaItem[] = []
-    const seenBooks = new Set<string>()
+    // Bucket the intitle: results by author.
+    // 2+ books by the same author matching the title search → series card.
+    // (seriesInfo is not reliably present in search responses, so we detect
+    //  series from the author+title pattern instead.)
+    const authorBuckets = new Map<string, { items: any[]; infos: any[] }>()
+    const seenInTitle = new Set<string>()
 
-    for (const item of [...(titleData.items ?? []), ...(generalData.items ?? [])]) {
+    for (const item of (titleData.items ?? [])) {
       const info = item.volumeInfo ?? {}
       const title: string = (info.title ?? 'Unknown').trim()
       const author: string = (info.authors?.[0] ?? '').trim()
-      const dedupeKey = `${title.toLowerCase()}||${author.toLowerCase()}`
-      if (seenBooks.has(dedupeKey)) continue
-      seenBooks.add(dedupeKey)
-
-      const seriesId: string | undefined = info.seriesInfo?.volumeSeries?.[0]?.seriesId
-      const volNum: number = parseFloat(info.seriesInfo?.bookDisplayNumber ?? '999')
-
-      if (seriesId) {
-        const existing = seriesMap.get(seriesId)
-        if (!existing || volNum < existing.volNum) {
-          seriesMap.set(seriesId, { item, info, volNum, author, stripped: stripVolumeSuffix(title) })
-        }
-      } else {
-        soloBooks.push(gbVolumeToItem(item))
-      }
+      const key = `${title.toLowerCase()}||${author.toLowerCase()}`
+      if (seenInTitle.has(key) || !author) continue
+      seenInTitle.add(key)
+      const bucket = authorBuckets.get(author.toLowerCase()) ?? { items: [], infos: [] }
+      bucket.items.push(item)
+      bucket.infos.push(info)
+      authorBuckets.set(author.toLowerCase(), bucket)
     }
 
-    // One 'book-series' card per detected series (series come first in results)
     const seriesItems: MediaItem[] = []
-    for (const [seriesId, { info, author, stripped }] of seriesMap) {
-      const thumb: string | undefined = info.imageLinks?.thumbnail ?? info.imageLinks?.smallThumbnail
-      const kw = keyWordsFrom(stripped)
+    const claimedIds = new Set<string>() // Google Books volume IDs absorbed into a series card
+
+    for (const [, { items, infos }] of authorBuckets) {
+      if (items.length < 2) continue
+      const author: string = infos[0].authors?.[0] ?? ''
+      const titles: string[] = infos.map(i => (i.title ?? '').trim())
+      const seriesName = commonTitlePrefix(titles) || stripVolumeSuffix(titles[0]) || q
+      const thumb: string | undefined = infos[0].imageLinks?.thumbnail ?? infos[0].imageLinks?.smallThumbnail
+
       seriesItems.push({
-        id: `bookseries-${seriesId}|||${encodeURIComponent(author)}|||${encodeURIComponent(kw)}`,
-        title: author ? `${stripped} — ${author}` : stripped,
+        id: `bookseries-${encodeURIComponent(author)}|||${encodeURIComponent(seriesName)}|||${encodeURIComponent(q)}`,
+        title: `${seriesName} — ${author}`,
         image: thumb ? thumb.replace('http:', 'https:') : null,
         type: 'book-series' as const,
         release_year: null,
       })
+      items.forEach(i => claimedIds.add(i.id))
+    }
+
+    // Remaining books not absorbed into a series card
+    const seenAll = new Set<string>()
+    const soloBooks: MediaItem[] = []
+    for (const item of [...(titleData.items ?? []), ...(generalData.items ?? [])]) {
+      if (claimedIds.has(item.id)) continue
+      const info = item.volumeInfo ?? {}
+      const title: string = (info.title ?? 'Unknown').trim()
+      const author: string = (info.authors?.[0] ?? '').trim()
+      const key = `${title.toLowerCase()}||${author.toLowerCase()}`
+      if (seenAll.has(key)) continue
+      seenAll.add(key)
+      soloBooks.push(gbVolumeToItem(item))
     }
 
     return [...seriesItems, ...soloBooks]
@@ -261,17 +281,13 @@ export async function getTvSeasons(tvId: string): Promise<MediaItem[]> {
 }
 
 export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
-  // ID format: bookseries-{seriesId}|||{encodedAuthor}|||{encodedKeyWords}
+  // ID format: bookseries-{encodedAuthor}|||{encodedSeriesName}|||{encodedQuery}
   const withoutPrefix = item.id.slice('bookseries-'.length)
-  const [seriesId, encodedAuthor, encodedKw] = withoutPrefix.split('|||')
+  const [encodedAuthor, , encodedQuery] = withoutPrefix.split('|||')
   const author = decodeURIComponent(encodedAuthor ?? '')
-  const kw = decodeURIComponent(encodedKw ?? '')
+  const query = decodeURIComponent(encodedQuery ?? '')
 
-  const q = [
-    author ? `inauthor:"${author}"` : '',
-    kw ? `intitle:${kw}` : '',
-  ].filter(Boolean).join(' ')
-
+  const q = `inauthor:"${author}" intitle:${query}`
   const params = new URLSearchParams({ q, maxResults: '40', printType: 'books', orderBy: 'newest' })
   if (GOOGLE_BOOKS_KEY) params.set('key', GOOGLE_BOOKS_KEY)
 
@@ -279,14 +295,8 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
     .then(r => r.ok ? r.json() : { items: [] })
     .catch(() => ({ items: [] }))
 
-  // Keep only volumes that belong to this series (when seriesId is known)
-  const filtered = (data.items ?? []).filter((v: any) => {
-    const vSid: string | undefined = v.volumeInfo?.seriesInfo?.volumeSeries?.[0]?.seriesId
-    return !vSid || vSid === seriesId
-  })
-
-  // Sort by volume number, then deduplicate by title+author
-  filtered.sort((a: any, b: any) => {
+  // Sort by volume number when available, otherwise keep API order
+  const sorted = [...(data.items ?? [])].sort((a: any, b: any) => {
     const an = parseFloat(a.volumeInfo?.seriesInfo?.bookDisplayNumber ?? '999')
     const bn = parseFloat(b.volumeInfo?.seriesInfo?.bookDisplayNumber ?? '999')
     return an - bn
@@ -294,11 +304,11 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
 
   const seen = new Set<string>()
   const result: MediaItem[] = []
-  for (const v of filtered) {
+  for (const v of sorted) {
     const info = v.volumeInfo ?? {}
     const title: string = (info.title ?? 'Unknown').trim()
-    const author: string = (info.authors?.[0] ?? '').trim()
-    const key = `${title.toLowerCase()}||${author.toLowerCase()}`
+    const auth: string = (info.authors?.[0] ?? '').trim()
+    const key = `${title.toLowerCase()}||${auth.toLowerCase()}`
     if (seen.has(key)) continue
     seen.add(key)
     result.push(gbVolumeToItem(v))
