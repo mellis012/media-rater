@@ -28,8 +28,10 @@ async function hardcoverQuery<T = any>(
       body: JSON.stringify({ query, variables }),
     })
     const json = await res.json()
+    if (json.errors) console.warn('[hardcover] errors:', JSON.stringify(json.errors).slice(0, 300))
     return json.data ?? null
-  } catch {
+  } catch (e) {
+    console.error('[hardcover] fetch error:', e)
     return null
   }
 }
@@ -266,7 +268,8 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
   `, { id: seriesId })
 
   const allBooks: any[] = data?.book_series ?? []
-  console.log('[volumes] seriesId:', seriesId, 'count:', allBooks.length, 'first featured_series:', allBooks[0]?.book?.featured_series)
+  console.log('[volumes] data:', JSON.stringify(data).slice(0, 300))
+  console.log('[volumes] seriesId:', seriesId, 'count:', allBooks.length)
 
   return allBooks
     .filter((bs: any) => bs.book?.featured_series === seriesId || allBooks.length <= 10)
