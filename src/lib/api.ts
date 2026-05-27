@@ -165,14 +165,19 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       `, { q }),
     ])
 
-    const seriesResults: any[] = seriesRes?.search?.results ?? []
-    const bookResults: any[] = bookRes?.search?.results ?? []
+    // Results come back as Typesense hits: { results: { hits: [{ document: {...} }] } }
+    const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
+    const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    const foundSeriesIds = new Set<number>(seriesResults.map((s: any) => s.id))
+    console.log('[hardcover] first series doc:', JSON.stringify(seriesResults[0]).slice(0, 400))
+    console.log('[hardcover] first book doc:', JSON.stringify(bookResults[0]).slice(0, 400))
+
+    // Series IDs come back as strings
+    const foundSeriesIds = new Set<string>(seriesResults.map((s: any) => String(s.id)))
 
     const seriesItems: MediaItem[] = seriesResults.map((s: any) => ({
       id: `hcseries-${s.id}`,
-      title: s.author_name ? `${s.title} — ${s.author_name}` : s.title,
+      title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
       image: s.image?.url ?? s.image ?? null,
       type: 'book-series' as const,
       release_year: null,
@@ -180,12 +185,12 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
 
     const soloBooks: MediaItem[] = bookResults
       .filter((b: any) =>
-        !(b.book_series ?? []).some((bs: any) => foundSeriesIds.has(bs.series?.id ?? bs.series_id))
+        !(b.series_ids ?? []).some((id: any) => foundSeriesIds.has(String(id)))
       )
       .map((b: any) => ({
         id: `hcbook-${b.id}`,
-        title: b.cached_contributors?.[0]?.name ?? b.author_name
-          ? `${b.title} — ${b.cached_contributors?.[0]?.name ?? b.author_name}`
+        title: b.author_name
+          ? `${b.title} — ${b.author_name}`
           : b.title,
         image: b.image?.url ?? b.image ?? null,
         type: 'book' as const,
