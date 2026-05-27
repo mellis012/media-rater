@@ -28,10 +28,8 @@ async function hardcoverQuery<T = any>(
       body: JSON.stringify({ query, variables }),
     })
     const json = await res.json()
-    console.log('[hardcover] status:', res.status, 'response:', JSON.stringify(json).slice(0, 600))
     return json.data ?? null
-  } catch (e) {
-    console.error('[hardcover] fetch error:', e)
+  } catch {
     return null
   }
 }
@@ -165,37 +163,33 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       `, { q }),
     ])
 
-    // Results come back as Typesense hits: { results: { hits: [{ document: {...} }] } }
+    // Results are Typesense hits: { results: { hits: [{ document: {...} }] } }
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    const b0 = bookResults[0]
-    console.log('[hardcover] book keys:', b0 ? Object.keys(b0).join(', ') : 'none')
-    console.log('[hardcover] book sample:', JSON.stringify({ id: b0?.id, title: b0?.title, image: b0?.image, release_date: b0?.release_date, author_name: b0?.author_name, series_id: b0?.series_id, series_ids: b0?.series_ids, book_series: b0?.book_series }))
-
-    // Series IDs come back as strings
-    const foundSeriesIds = new Set<string>(seriesResults.map((s: any) => String(s.id)))
+    // Series ids are strings in series docs but numbers in book.series_ids
+    const foundSeriesIds = new Set<number>(seriesResults.map((s: any) => parseInt(s.id, 10)))
 
     const seriesItems: MediaItem[] = seriesResults.map((s: any) => ({
       id: `hcseries-${s.id}`,
       title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
-      image: s.author?.image?.url ?? null, // series search docs have no cover image
+      image: s.author?.image?.url ?? null,
       type: 'book-series' as const,
       release_year: null,
     }))
 
     const soloBooks: MediaItem[] = bookResults
       .filter((b: any) =>
-        !(b.series_ids ?? []).some((id: any) => foundSeriesIds.has(String(id)))
+        !(b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))
       )
       .map((b: any) => ({
         id: `hcbook-${b.id}`,
-        title: b.author_name
-          ? `${b.title} — ${b.author_name}`
+        title: b.author_names?.[0]
+          ? `${b.title} — ${b.author_names[0]}`
           : b.title,
-        image: b.image?.url ?? b.image ?? null,
+        image: b.image?.url ?? null,
         type: 'book' as const,
-        release_year: yearFrom(b.release_date),
+        release_year: b.release_year ?? yearFrom(b.release_date),
       }))
 
     return [...seriesItems, ...soloBooks]
