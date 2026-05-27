@@ -260,6 +260,7 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
           title
           release_date
           users_count
+          compilation
           image { url }
           cached_contributors
         }
@@ -270,16 +271,18 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
   const allBooks: any[] = data?.book_series ?? []
 
   // Deduplicate: many editions/translations share the same position.
-  // Pick the edition with the highest users_count (most readers) — this is
-  // almost always the English original.
+  // Priority: 1) skip compilations/omnibuses, 2) skip non-Latin titles
+  // (Japanese, Chinese, Korean, Arabic), 3) prefer highest users_count.
+  const NON_LATIN = /[⺀-鿿가-힯豈-﫿]/
   const positionMap = new Map<number, any>()
   for (const bs of allBooks) {
     const pos = bs.position
-    if (pos != null && pos > 0 && pos % 1 === 0) {
-      const existing = positionMap.get(pos)
-      if (!existing || (bs.book.users_count ?? 0) > (existing.book.users_count ?? 0)) {
-        positionMap.set(pos, bs)
-      }
+    if (pos == null || pos <= 0 || pos % 1 !== 0) continue
+    if (bs.book.compilation === true) continue
+    if (NON_LATIN.test(bs.book.title ?? '')) continue
+    const existing = positionMap.get(pos)
+    if (!existing || (bs.book.users_count ?? 0) > (existing.book.users_count ?? 0)) {
+      positionMap.set(pos, bs)
     }
   }
 
