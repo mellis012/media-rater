@@ -28,7 +28,7 @@ async function hardcoverQuery<T = any>(
       body: JSON.stringify({ query, variables }),
     })
     const json = await res.json()
-    console.log('[hardcover] status:', res.status, 'response:', JSON.stringify(json).slice(0, 300))
+    console.log('[hardcover] status:', res.status, 'response:', JSON.stringify(json).slice(0, 600))
     return json.data ?? null
   } catch (e) {
     console.error('[hardcover] fetch error:', e)
@@ -146,66 +146,48 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
   }
 
   if (category === 'book') {
-    // Search series and individual books in parallel.
-    // Series come first; solo books are filtered to exclude those already
-    // covered by a returned series card.
-    const [seriesData, bookData] = await Promise.all([
+    // Use Hardcover's search query — _ilike is disabled on their public API.
+    // Search series and books in parallel; series cards come first.
+    const [seriesRes, bookRes] = await Promise.all([
       hardcoverQuery(`
         query($q: String!) {
-          series(
-            where: { title: { _ilike: $q } }
-            order_by: { readers_count: desc }
-            limit: 20
-          ) {
-            id
-            title
-            author_name
-            book_series(order_by: { position: asc }, limit: 1) {
-              book { image { url } }
-            }
+          search(query: $q, query_type: "Series", per_page: 10) {
+            results
           }
         }
-      `, { q: `%${q}%` }),
+      `, { q }),
       hardcoverQuery(`
         query($q: String!) {
-          books(
-            where: { title: { _ilike: $q } }
-            order_by: { users_count: desc }
-            limit: 20
-          ) {
-            id
-            title
-            release_date
-            image { url }
-            cached_contributors { name }
-            book_series { series { id } }
+          search(query: $q, query_type: "Book", per_page: 20) {
+            results
           }
         }
-      `, { q: `%${q}%` }),
+      `, { q }),
     ])
 
-    const foundSeriesIds = new Set<number>(
-      (seriesData?.series ?? []).map((s: any) => s.id)
-    )
+    const seriesResults: any[] = seriesRes?.search?.results ?? []
+    const bookResults: any[] = bookRes?.search?.results ?? []
 
-    const seriesItems: MediaItem[] = (seriesData?.series ?? []).map((s: any) => ({
+    const foundSeriesIds = new Set<number>(seriesResults.map((s: any) => s.id))
+
+    const seriesItems: MediaItem[] = seriesResults.map((s: any) => ({
       id: `hcseries-${s.id}`,
       title: s.author_name ? `${s.title} — ${s.author_name}` : s.title,
-      image: s.book_series?.[0]?.book?.image?.url ?? null,
+      image: s.image?.url ?? s.image ?? null,
       type: 'book-series' as const,
       release_year: null,
     }))
 
-    const soloBooks: MediaItem[] = (bookData?.books ?? [])
+    const soloBooks: MediaItem[] = bookResults
       .filter((b: any) =>
-        !(b.book_series ?? []).some((bs: any) => foundSeriesIds.has(bs.series?.id))
+        !(b.book_series ?? []).some((bs: any) => foundSeriesIds.has(bs.series?.id ?? bs.series_id))
       )
       .map((b: any) => ({
         id: `hcbook-${b.id}`,
-        title: b.cached_contributors?.[0]?.name
-          ? `${b.title} — ${b.cached_contributors[0].name}`
+        title: b.cached_contributors?.[0]?.name ?? b.author_name
+          ? `${b.title} — ${b.cached_contributors?.[0]?.name ?? b.author_name}`
           : b.title,
-        image: b.image?.url ?? null,
+        image: b.image?.url ?? b.image ?? null,
         type: 'book' as const,
         release_year: yearFrom(b.release_date),
       }))
