@@ -169,8 +169,8 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    console.log('[hardcover] first series doc:', JSON.stringify(seriesResults[0]).slice(0, 400))
-    console.log('[hardcover] first book doc:', JSON.stringify(bookResults[0]).slice(0, 400))
+    console.log('[hardcover] first series doc:', JSON.stringify(seriesResults[0]).slice(0, 600))
+    console.log('[hardcover] first book doc:', JSON.stringify(bookResults[0]).slice(0, 800))
 
     // Series IDs come back as strings
     const foundSeriesIds = new Set<string>(seriesResults.map((s: any) => String(s.id)))
@@ -261,7 +261,7 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
             title
             release_date
             image { url }
-            cached_contributors { name }
+            cached_contributors
           }
         }
       }
