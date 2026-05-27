@@ -259,7 +259,6 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
           id
           title
           release_date
-          featured_series
           image { url }
           cached_contributors
         }
@@ -268,11 +267,11 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
   `, { id: seriesId })
 
   const allBooks: any[] = data?.book_series ?? []
-  console.log('[volumes] data:', JSON.stringify(data).slice(0, 300))
-  console.log('[volumes] seriesId:', seriesId, 'count:', allBooks.length)
 
   return allBooks
-    .filter((bs: any) => bs.book?.featured_series === seriesId || allBooks.length <= 10)
+    // Keep only books at whole-number positions (1, 2, 3…) — skips companion
+    // novellas and extras that get decimal positions (0.5, 1.5, etc.)
+    .filter((bs: any) => bs.position != null && bs.position % 1 === 0 && bs.position > 0)
     .map((bs: any) => ({
       id: `hcbook-${bs.book.id}`,
       title: bs.book.cached_contributors?.[0]?.name
