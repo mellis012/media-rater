@@ -169,10 +169,15 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    // Series ids are strings in series docs but numbers in book.series_ids
-    const foundSeriesIds = new Set<number>(seriesResults.map((s: any) => parseInt(s.id, 10)))
+    // Filter out omnibus / boxset / collection series — these are repackaged
+    // editions, not the canonical reading order.
+    const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
+    const filteredSeries = seriesResults.filter((s: any) => !OMNIBUS_RE.test(s.name ?? ''))
 
-    const seriesItems: MediaItem[] = seriesResults.map((s: any) => ({
+    // Series ids are strings in series docs but numbers in book.series_ids
+    const foundSeriesIds = new Set<number>(filteredSeries.map((s: any) => parseInt(s.id, 10)))
+
+    const seriesItems: MediaItem[] = filteredSeries.map((s: any) => ({
       id: `hcseries-${s.id}`,
       title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
       image: s.author?.image?.url ?? null,
