@@ -264,7 +264,10 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
     }
   `, { id: seriesId })
 
-  return (data?.series_by_pk?.book_series ?? [])
+  const allBooks = data?.series_by_pk?.book_series ?? []
+  console.log('[volumes] seriesId:', seriesId, 'count:', allBooks.length, 'first featured_series:', allBooks[0]?.book?.featured_series)
+
+  return allBooks
     .filter((bs: any) => bs.book.featured_series === seriesId)
     .map((bs: any) => ({
       id: `hcbook-${bs.book.id}`,
