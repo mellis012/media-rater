@@ -268,11 +268,21 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
 
   const allBooks: any[] = data?.book_series ?? []
 
-  return allBooks
-    // Keep only books at whole-number positions (1, 2, 3…) — skips companion
-    // novellas and extras that get decimal positions (0.5, 1.5, etc.)
-    .filter((bs: any) => bs.position != null && bs.position % 1 === 0 && bs.position > 0)
-    .map((bs: any) => ({
+  // Deduplicate: take one book per integer position (each edition/translation
+  // of the same series slot has the same position, giving 100+ raw rows).
+  // The first row at each position is the most-read edition (query is unordered
+  // by edition, so we rely on Hasura returning a consistent primary record).
+  const positionMap = new Map<number, any>()
+  for (const bs of allBooks) {
+    const pos = bs.position
+    if (pos != null && pos > 0 && pos % 1 === 0 && !positionMap.has(pos)) {
+      positionMap.set(pos, bs)
+    }
+  }
+
+  return Array.from(positionMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([, bs]) => ({
       id: `hcbook-${bs.book.id}`,
       title: bs.book.cached_contributors?.[0]?.name
         ? `${bs.book.title} — ${bs.book.cached_contributors[0].name}`
