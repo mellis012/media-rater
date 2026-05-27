@@ -255,6 +255,7 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
             id
             title
             release_date
+            featured_series
             image { url }
             cached_contributors
           }
@@ -263,15 +264,17 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
     }
   `, { id: seriesId })
 
-  return (data?.series_by_pk?.book_series ?? []).map((bs: any) => ({
-    id: `hcbook-${bs.book.id}`,
-    title: bs.book.cached_contributors?.[0]?.name
-      ? `${bs.book.title} — ${bs.book.cached_contributors[0].name}`
-      : bs.book.title,
-    image: bs.book.image?.url ?? null,
-    type: 'book' as const,
-    release_year: yearFrom(bs.book.release_date),
-  }))
+  return (data?.series_by_pk?.book_series ?? [])
+    .filter((bs: any) => bs.book.featured_series === seriesId)
+    .map((bs: any) => ({
+      id: `hcbook-${bs.book.id}`,
+      title: bs.book.cached_contributors?.[0]?.name
+        ? `${bs.book.title} — ${bs.book.cached_contributors[0].name}`
+        : bs.book.title,
+      image: bs.book.image?.url ?? null,
+      type: 'book' as const,
+      release_year: yearFrom(bs.book.release_date),
+    }))
 }
 
 export async function getDiscography(artistId: string): Promise<MediaItem[]> {
