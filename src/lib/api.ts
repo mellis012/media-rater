@@ -259,6 +259,7 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
           id
           title
           release_date
+          users_count
           image { url }
           cached_contributors
         }
@@ -268,15 +269,17 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
 
   const allBooks: any[] = data?.book_series ?? []
 
-  // Deduplicate: take one book per integer position (each edition/translation
-  // of the same series slot has the same position, giving 100+ raw rows).
-  // The first row at each position is the most-read edition (query is unordered
-  // by edition, so we rely on Hasura returning a consistent primary record).
+  // Deduplicate: many editions/translations share the same position.
+  // Pick the edition with the highest users_count (most readers) — this is
+  // almost always the English original.
   const positionMap = new Map<number, any>()
   for (const bs of allBooks) {
     const pos = bs.position
-    if (pos != null && pos > 0 && pos % 1 === 0 && !positionMap.has(pos)) {
-      positionMap.set(pos, bs)
+    if (pos != null && pos > 0 && pos % 1 === 0) {
+      const existing = positionMap.get(pos)
+      if (!existing || (bs.book.users_count ?? 0) > (existing.book.users_count ?? 0)) {
+        positionMap.set(pos, bs)
+      }
     }
   }
 
