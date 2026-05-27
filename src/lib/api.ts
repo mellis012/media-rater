@@ -248,27 +248,28 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
 
   const data = await hardcoverQuery(`
     query($id: Int!) {
-      series_by_pk(id: $id) {
-        book_series(order_by: { position: asc }) {
-          position
-          book {
-            id
-            title
-            release_date
-            featured_series
-            image { url }
-            cached_contributors
-          }
+      book_series(
+        where: { series_id: { _eq: $id } }
+        order_by: { position: asc }
+      ) {
+        position
+        book {
+          id
+          title
+          release_date
+          featured_series
+          image { url }
+          cached_contributors
         }
       }
     }
   `, { id: seriesId })
 
-  const allBooks = data?.series_by_pk?.book_series ?? []
+  const allBooks: any[] = data?.book_series ?? []
   console.log('[volumes] seriesId:', seriesId, 'count:', allBooks.length, 'first featured_series:', allBooks[0]?.book?.featured_series)
 
   return allBooks
-    .filter((bs: any) => bs.book.featured_series === seriesId)
+    .filter((bs: any) => bs.book?.featured_series === seriesId || allBooks.length <= 10)
     .map((bs: any) => ({
       id: `hcbook-${bs.book.id}`,
       title: bs.book.cached_contributors?.[0]?.name
