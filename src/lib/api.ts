@@ -169,8 +169,9 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    console.log('[hardcover] first series doc:', JSON.stringify(seriesResults[0]).slice(0, 600))
-    console.log('[hardcover] first book doc:', JSON.stringify(bookResults[0]).slice(0, 800))
+    const b0 = bookResults[0]
+    console.log('[hardcover] book keys:', b0 ? Object.keys(b0).join(', ') : 'none')
+    console.log('[hardcover] book sample:', JSON.stringify({ id: b0?.id, title: b0?.title, image: b0?.image, release_date: b0?.release_date, author_name: b0?.author_name, series_id: b0?.series_id, series_ids: b0?.series_ids, book_series: b0?.book_series }))
 
     // Series IDs come back as strings
     const foundSeriesIds = new Set<string>(seriesResults.map((s: any) => String(s.id)))
@@ -178,7 +179,7 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesItems: MediaItem[] = seriesResults.map((s: any) => ({
       id: `hcseries-${s.id}`,
       title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
-      image: s.image?.url ?? s.image ?? null,
+      image: s.author?.image?.url ?? null, // series search docs have no cover image
       type: 'book-series' as const,
       release_year: null,
     }))
