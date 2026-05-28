@@ -166,7 +166,23 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     ])
 
     // Results are Typesense hits: { results: { hits: [{ document: {...} }] } }
-    const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
+    // Deduplicate series by id — multi-author series (e.g. Blue Lock) return one
+    // hit per author; merge them into a single entry with joined author names.
+    const rawSeriesHits: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
+    const seriesById = new Map<number, any>()
+    for (const s of rawSeriesHits) {
+      const sid = parseInt(s.id, 10)
+      if (!seriesById.has(sid)) {
+        seriesById.set(sid, { ...s, _authors: s.author_name ? [s.author_name] : [] })
+      } else if (s.author_name) {
+        const existing = seriesById.get(sid)
+        if (!existing._authors.includes(s.author_name)) existing._authors.push(s.author_name)
+      }
+    }
+    const seriesResults: any[] = Array.from(seriesById.values()).map(s => ({
+      ...s,
+      author_name: s._authors.length > 0 ? s._authors.join(', ') : null,
+    }))
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
     // Detect manga/manhwa/manhua series with a two-pass approach.
