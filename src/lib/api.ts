@@ -275,34 +275,71 @@ async function searchHardcover(
   }
 
   // ── Genre filter for explicit category modes ──────────────────────────────
-  // For manga/manhwa/manhua: hide series whose book evidence is entirely prose.
-  // For novel/light-novel/webnovel: hide series whose book evidence is entirely comics.
-  // A series with no book evidence (nothing in the top-40 results) is always shown
-  // — we can't determine its genre so we leave it in.
+  // For graphic-novel mode: hide series whose only evidence is prose books.
+  // For novel mode: hide series whose only evidence is comics books.
+  // A series with no evidence at all (nothing in the top-40 results matched it)
+  // is kept — we can't determine its genre.
+  //
+  // Matching strategy (both used, whichever hits first):
+  //   1. ID match  — every ID in b.series_ids and featured_series against _allIds
+  //   2. Name prefix — "Blue Lock, Vol. 5" starts with series name "Blue Lock"
+  //      (fallback for when CJK absorption left the IDs disconnected)
   const COMICS_RE = /manga|manhwa|manhua|comics/i
-  const seriesHasComics = new Set<number>()   // series with ≥1 comics-genre book
-  const seriesHasNonComics = new Set<number>() // series with ≥1 non-comics book
+
+  const comicsIdx = new Set<number>()  // filteredSeries indices with comics evidence
+  const proseIdx  = new Set<number>()  // filteredSeries indices with prose evidence
+
   if (forceSeriesType !== 'auto') {
+    // Index helpers
+    const sidToIdx = new Map<number, number>()
+    const nameToIdx = new Map<string, number>()
+    for (let i = 0; i < filteredSeries.length; i++) {
+      for (const id of filteredSeries[i]._allIds as number[]) sidToIdx.set(id, i)
+      nameToIdx.set((filteredSeries[i].name ?? '').toLowerCase().trim(), i)
+    }
+
     for (const b of bookResults) {
       const isComics = (b.genres ?? []).some((g: string) => COMICS_RE.test(g))
-      for (const sid of primarySids(b)) {
-        if (isComics) seriesHasComics.add(sid)
-        else seriesHasNonComics.add(sid)
+      const hit = new Set<number>()
+
+      // ID match: use all series_ids + featured series id
+      const allBSids = new Set<number>([
+        ...primarySids(b),
+        ...((b.series_ids ?? []) as number[]).filter((n: number) => n > 0),
+      ])
+      for (const sid of allBSids) {
+        const idx = sidToIdx.get(sid)
+        if (idx !== undefined) hit.add(idx)
+      }
+
+      // Name-prefix fallback (only when ID match found nothing):
+      // "Blue Lock, Vol. 5" → series "Blue Lock"; "One Piece 1" → series "One Piece"
+      if (hit.size === 0) {
+        const t = (b.title ?? '').toLowerCase().trim()
+        for (const [name, idx] of nameToIdx) {
+          if (name.length >= 3 && (
+            t.startsWith(name + ' ') ||
+            t.startsWith(name + ',') ||
+            t.startsWith(name + ':')
+          )) hit.add(idx)
+        }
+      }
+
+      for (const idx of hit) {
+        if (isComics) comicsIdx.add(idx)
+        else proseIdx.add(idx)
       }
     }
   }
 
-  const displaySeries = filteredSeries.filter((s: any) => {
+  const displaySeries = filteredSeries.filter((_: any, i: number) => {
     if (forceSeriesType === 'auto') return true
-    const ids = s._allIds as number[]
-    const hasComics    = ids.some(id => seriesHasComics.has(id))
-    const hasNonComics = ids.some(id => seriesHasNonComics.has(id))
+    const hasComics    = comicsIdx.has(i)
+    const hasNonComics = proseIdx.has(i)
     if (forceSeriesType === 'manga-series') {
-      // Exclude only when every book we saw is non-comics (definitely prose).
-      return !(hasNonComics && !hasComics)
+      return !(hasNonComics && !hasComics)  // hide if only prose evidence
     } else {
-      // Exclude only when every book we saw is comics (definitely manga/manhwa).
-      return !(hasComics && !hasNonComics)
+      return !(hasComics && !hasNonComics)  // hide if only comics evidence
     }
   })
 
@@ -326,11 +363,13 @@ async function searchHardcover(
   const soloBooks: MediaItem[] = bookResults
     .filter((b: any) => {
       if ((b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))) return false
-      // Genre gate: in comics modes keep only comics books; in prose modes exclude them.
+      // Genre gate: in graphic-novel mode keep only comics books (books with no
+      // genre info are kept — can't determine). In novel mode exclude comics books.
       if (forceSeriesType !== 'auto') {
-        const isComics = (b.genres ?? []).some((g: string) => COMICS_RE.test(g))
-        if (forceSeriesType === 'manga-series' && !isComics && (b.genres ?? []).length > 0) return false
-        if (forceSeriesType === 'book-series'  &&  isComics) return false
+        const genres = b.genres ?? []
+        const isComics = genres.some((g: string) => COMICS_RE.test(g))
+        if (forceSeriesType === 'manga-series' && genres.length > 0 && !isComics) return false
+        if (forceSeriesType === 'book-series'  && isComics) return false
       }
       const key = `${(b.title ?? '').toLowerCase()}|${(b.author_names?.[0] ?? '').toLowerCase()}`
       if (seenBookKeys.has(key)) return false
@@ -386,15 +425,11 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
 
   // ── Book-like categories → Hardcover ─────────────────────────────────────
   // 'book' kept for backward compatibility (auto-detection).
-  // Explicit subcategories bypass detection: the user's category choice IS the signal.
+  // Explicit categories bypass detection: the user's choice IS the signal.
   const HARDCOVER_SERIES_TYPE: Record<string, 'auto' | 'manga-series' | 'book-series'> = {
-    book:           'auto',
-    novel:          'book-series',
-    'light-novel':  'book-series',
-    webnovel:       'book-series',
-    manga:          'manga-series',
-    manhwa:         'manga-series',
-    manhua:         'manga-series',
+    book:            'auto',          // legacy
+    novel:           'book-series',   // Novels (prose: novels, LNs, webnovels)
+    'graphic-novel': 'manga-series',  // Graphic Novels (manga, manhwa, manhua, comics)
   }
   if (category in HARDCOVER_SERIES_TYPE) {
     return searchHardcover(q, HARDCOVER_SERIES_TYPE[category])

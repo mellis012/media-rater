@@ -1,15 +1,12 @@
 import { type KeyboardEvent } from 'react'
 
 const CATEGORIES: { value: string; label: string }[] = [
-  { value: 'movie',       label: 'Movies' },
-  { value: 'tv',          label: 'TV Shows' },
-  { value: 'novel',       label: 'Novels' },
-  { value: 'light-novel', label: 'Light Novels' },
-  { value: 'manga',       label: 'Manga' },
-  { value: 'manhwa',      label: 'Manhwa' },
-  { value: 'webnovel',    label: 'Webnovels' },
-  { value: 'game',        label: 'Games' },
-  { value: 'artist',      label: 'Artists' },
+  { value: 'movie',         label: 'Movies' },
+  { value: 'tv',            label: 'TV Shows' },
+  { value: 'novel',         label: 'Novels' },
+  { value: 'graphic-novel', label: 'Graphic Novels' },
+  { value: 'game',          label: 'Games' },
+  { value: 'artist',        label: 'Artists' },
 ]
 
 interface Props {
