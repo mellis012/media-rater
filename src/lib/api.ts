@@ -355,6 +355,7 @@ async function searchAnilist(q: string): Promise<MediaItem[]> {
                 search: $search
                 type: MANGA
                 format_not_in: [NOVEL]
+                isAdult: false
                 sort: SEARCH_MATCH
               ) {
                 id
