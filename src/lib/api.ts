@@ -172,16 +172,19 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     // Detect manga/manhwa/manhua series using featured_series from book docs.
     // featured_series is the book's PRIMARY series — more precise than series_ids,
     // which can include a novel series on a manhwa adaptation and cause false positives.
+    // Guard: featured_series must be a positive integer (0 means "not set" in Typesense).
     const mangaSeriesIds = new Set<number>()
     for (const b of bookResults) {
       const isComics = (b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))
       if (!isComics) continue
-      if (b.featured_series != null) {
-        mangaSeriesIds.add(Number(b.featured_series))
+      const fs = Number(b.featured_series)
+      if (fs > 0) {
+        mangaSeriesIds.add(fs)
       } else {
         for (const sid of b.series_ids ?? []) mangaSeriesIds.add(sid)
       }
     }
+    console.log('[manga] detected series IDs:', [...mangaSeriesIds])
 
     // Propagate: if a series in these results is manga, mark other series by
     // the same author as manga too — catches spin-offs like Blue Lock: Episode Nagi
