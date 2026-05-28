@@ -337,6 +337,53 @@ async function searchHardcover(
   return [...seriesItems, ...soloBooks]
 }
 
+// ── AniList manga / manhwa / manhua search ───────────────────────────────
+// AniList is a dedicated anime+manga database with a free public GraphQL API
+// (https://graphql.anilist.co) that accepts browser requests without a key.
+// type: MANGA covers manga, manhwa, manhua, OEL, and one-shots.
+// format_not_in: [NOVEL] excludes light novels so they stay in the Novels tab.
+async function searchAnilist(q: string): Promise<MediaItem[]> {
+  try {
+    const res = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        query: `
+          query ($search: String) {
+            Page(page: 1, perPage: 30) {
+              media(
+                search: $search
+                type: MANGA
+                format_not_in: [NOVEL]
+                sort: SEARCH_MATCH
+              ) {
+                id
+                title { romaji english }
+                coverImage { large }
+                format
+                startDate { year }
+              }
+            }
+          }
+        `,
+        variables: { search: q },
+      }),
+    })
+    const json = await res.json()
+    const media: any[] = json?.data?.Page?.media ?? []
+    return media.map((m: any) => ({
+      id: `anilist-${m.id}`,
+      title: m.title.english ?? m.title.romaji,
+      image: m.coverImage?.large ?? null,
+      type: 'manga-series' as const,
+      release_year: m.startDate?.year ?? null,
+    }))
+  } catch (e) {
+    console.error('[anilist] fetch error:', e)
+    return []
+  }
+}
+
 export async function searchMedia(q: string, category: string): Promise<MediaItem[]> {
   if (category === 'movie') {
     // Fetch 2 pages concurrently for ~40 results
@@ -371,13 +418,16 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     }))
   }
 
-  // ── Book-like categories → Hardcover ─────────────────────────────────────
+  // ── Graphic Novels → AniList ──────────────────────────────────────────────
+  // AniList is a dedicated manga/manhwa/manhua database — no prose contamination,
+  // no detection heuristics needed.
+  if (category === 'graphic-novel') return searchAnilist(q)
+
+  // ── Other book-like categories → Hardcover ────────────────────────────────
   // 'book' kept for backward compatibility (auto-detection).
-  // Explicit categories bypass detection: the user's choice IS the signal.
   const HARDCOVER_SERIES_TYPE: Record<string, 'auto' | 'manga-series' | 'book-series'> = {
-    book:            'auto',          // legacy
-    novel:           'book-series',   // Novels (prose: novels, LNs, webnovels)
-    'graphic-novel': 'manga-series',  // Graphic Novels (manga, manhwa, manhua, comics)
+    book:  'auto',         // legacy: auto-detect manga vs prose
+    novel: 'book-series',  // Novels (prose: novels, LNs, webnovels)
   }
   if (category in HARDCOVER_SERIES_TYPE) {
     return searchHardcover(q, HARDCOVER_SERIES_TYPE[category])
