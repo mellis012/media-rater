@@ -166,27 +166,60 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     ])
 
     // Results are Typesense hits: { results: { hits: [{ document: {...} }] } }
-    // Deduplicate series by normalised name:
-    //   1. Skip non-Latin/CJK titles (ブルーロック etc.) — prefer the English entry.
-    //   2. Merge entries with the same name (same real-world series, separate
-    //      Hardcover records per author), track ALL ids and join author names.
-    //      Tracking all ids is required so manga-detection and foundSeriesIds
-    //      stay correct after the merge.
+    // Deduplicate series in three passes:
+    //   1. ID-dedup: same series can appear once per author → merge authors.
+    //   2. Name-dedup (Latin only): same real-world series can have multiple
+    //      Hardcover records (e.g. one per author credit) → merge, track all ids.
+    //   3. CJK absorption: Japanese/Chinese titles like "ブルーロック [Blue Lock]"
+    //      have the Latin name in brackets. We absorb their IDs into the matching
+    //      Latin entry so manga-detection and foundSeriesIds stay correct even
+    //      though we don't display the CJK card.
     const NON_LATIN_SERIES = /[⺀-鿿가-힯豈-﫿぀-ヿ]/
     const rawSeriesHits: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
-    const seriesByName = new Map<string, { entry: any; ids: number[]; authors: string[] }>()
+
+    // Pass 1 — id dedup
+    const seriesById = new Map<number, any>()
     for (const s of rawSeriesHits) {
+      const sid = parseInt(s.id, 10)
+      if (!seriesById.has(sid)) {
+        seriesById.set(sid, { ...s, _mergedAuthors: s.author_name ? [s.author_name] : [] })
+      } else if (s.author_name) {
+        const e = seriesById.get(sid)!
+        if (!e._mergedAuthors.includes(s.author_name)) e._mergedAuthors.push(s.author_name)
+      }
+    }
+
+    // Pass 2 — name dedup (Latin entries only, for display)
+    const seriesByName = new Map<string, { entry: any; ids: number[]; authors: string[] }>()
+    for (const [sid, s] of seriesById) {
       if (NON_LATIN_SERIES.test(s.name ?? '')) continue
       const key = (s.name ?? '').toLowerCase().trim()
-      const sid = parseInt(s.id, 10)
       if (!seriesByName.has(key)) {
-        seriesByName.set(key, { entry: s, ids: [sid], authors: s.author_name ? [s.author_name] : [] })
+        seriesByName.set(key, { entry: s, ids: [sid], authors: s._mergedAuthors })
       } else {
         const m = seriesByName.get(key)!
         if (!m.ids.includes(sid)) m.ids.push(sid)
-        if (s.author_name && !m.authors.includes(s.author_name)) m.authors.push(s.author_name)
+        for (const a of s._mergedAuthors) if (!m.authors.includes(a)) m.authors.push(a)
       }
     }
+
+    // Pass 3 — absorb CJK ids into matching Latin entries via bracket content
+    // e.g. "ブルーロック [Blue Lock]" → bracket = "blue lock" → absorbed into Latin "Blue Lock"
+    for (const [sid, s] of seriesById) {
+      if (!NON_LATIN_SERIES.test(s.name ?? '')) continue
+      const bracketMatch = (s.name ?? '').match(/\[([^\]]+)\]/)
+      if (!bracketMatch) continue
+      const bracketKey = bracketMatch[1].toLowerCase().trim()
+      // exact match first, then fuzzy (spaces stripped) for "Bluelock" vs "Blue Lock"
+      const targetKey = seriesByName.has(bracketKey)
+        ? bracketKey
+        : [...seriesByName.keys()].find(k => k.replace(/\s/g, '') === bracketKey.replace(/\s/g, ''))
+      if (targetKey) {
+        const m = seriesByName.get(targetKey)!
+        if (!m.ids.includes(sid)) m.ids.push(sid)
+      }
+    }
+
     const seriesResults: any[] = Array.from(seriesByName.values()).map(({ entry, ids, authors }) => ({
       ...entry,
       _allIds: ids,
