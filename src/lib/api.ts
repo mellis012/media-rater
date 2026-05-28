@@ -169,21 +169,33 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    // Filter out omnibus / boxset / collection series — these are repackaged
-    // editions, not the canonical reading order.
+    // Detect manga/manhwa/manhua series: check genres on book results.
+    // Books whose genres include manga keywords tell us which series IDs are manga.
+    const mangaSeriesIds = new Set<number>()
+    for (const b of bookResults) {
+      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua/i.test(g))) {
+        for (const sid of b.series_ids ?? []) mangaSeriesIds.add(sid)
+      }
+    }
+
+    // Filter out omnibus / boxset / collection series — repackaged editions,
+    // not the canonical reading order.
     const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
     const filteredSeries = seriesResults.filter((s: any) => !OMNIBUS_RE.test(s.name ?? ''))
 
     // Series ids are strings in series docs but numbers in book.series_ids
     const foundSeriesIds = new Set<number>(filteredSeries.map((s: any) => parseInt(s.id, 10)))
 
-    const seriesItems: MediaItem[] = filteredSeries.map((s: any) => ({
-      id: `hcseries-${s.id}`,
-      title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
-      image: s.author?.image?.url ?? null,
-      type: 'book-series' as const,
-      release_year: null,
-    }))
+    const seriesItems: MediaItem[] = filteredSeries.map((s: any) => {
+      const sid = parseInt(s.id, 10)
+      return {
+        id: `hcseries-${s.id}`,
+        title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
+        image: s.author?.image?.url ?? null,
+        type: (mangaSeriesIds.has(sid) ? 'manga-series' : 'book-series') as const,
+        release_year: null,
+      }
+    })
 
     const soloBooks: MediaItem[] = bookResults
       .filter((b: any) =>

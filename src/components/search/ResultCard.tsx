@@ -16,6 +16,7 @@ const TYPE_LABELS: Partial<Record<MediaCategory, string>> = {
   'tv': 'tv show',
   'tv-season': 'tv season',
   'book-series': 'series',
+  'manga-series': 'manga',
 }
 
 export default function ResultCard({ item, userId, existingRating, onRate, onDrill, parentImage }: Props) {
