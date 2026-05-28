@@ -178,6 +178,7 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       const isComics = (b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))
       if (!isComics) continue
       const fs = Number(b.featured_series)
+      console.log('[manga] comic book:', b.title?.slice(0, 40), '| featured_series:', b.featured_series, '| fs_num:', fs, '| series_ids:', b.series_ids)
       if (fs > 0) {
         mangaSeriesIds.add(fs)
       } else {
