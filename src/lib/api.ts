@@ -173,8 +173,7 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     // Books whose genres include manga keywords tell us which series IDs are manga.
     const mangaSeriesIds = new Set<number>()
     for (const b of bookResults) {
-      if (b.genres?.length) console.log('[genres]', b.title, b.genres)
-      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua/i.test(g))) {
+      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
         for (const sid of b.series_ids ?? []) mangaSeriesIds.add(sid)
       }
     }
