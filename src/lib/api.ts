@@ -292,6 +292,17 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       for (const id of (s._allIds as number[])) foundSeriesIds.add(id)
     }
 
+    // Transitively expand foundSeriesIds: if a book's primary series is already known,
+    // absorb all its other series_ids too — catches volumes that cross-reference
+    // multiple series records for the same real-world series (e.g. CJK variants
+    // without brackets that couldn't be absorbed during the three-pass dedup).
+    for (const b of bookResults) {
+      const primary = primarySids(b)
+      if (primary.some((id: number) => foundSeriesIds.has(id) || mangaSeriesIds.has(id))) {
+        for (const sid of (b.series_ids ?? []) as number[]) foundSeriesIds.add(sid)
+      }
+    }
+
     const seriesItems: MediaItem[] = filteredSeries.map((s: any) => {
       const isManga = (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id))
       return {
