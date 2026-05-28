@@ -307,10 +307,25 @@ async function searchHardcover(
   // Solo books: not part of any series in these results.
   // Deduplicate by title+author to avoid showing multiple editions.
   // For explicit categories, also filter by book genre.
+  //
+  // Title-prefix suppression: some volumes have series_ids: [] in Typesense
+  // even though they belong to a series card in these results (Hardcover data
+  // quality gap). Suppress them if their title starts with a known series name.
+  const seriesNamePrefixes = filteredSeries
+    .map((s: any) => (s.name ?? '').toLowerCase().trim())
+    .filter((n: string) => n.length >= 5)
+
   const seenBookKeys = new Set<string>()
   const soloBooks: MediaItem[] = bookResults
     .filter((b: any) => {
       if ((b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))) return false
+      const titleLower = (b.title ?? '').toLowerCase().trim()
+      if (seriesNamePrefixes.some((name: string) =>
+        titleLower === name ||
+        titleLower.startsWith(name + ' ') ||
+        titleLower.startsWith(name + ',') ||
+        titleLower.startsWith(name + ':')
+      )) return false
       // Genre gate: in graphic-novel mode keep only comics books (books with no
       // genre info are kept — can't determine). In novel mode exclude comics books.
       if (forceSeriesType !== 'auto') {
@@ -484,33 +499,47 @@ export async function getTvSeasons(tvId: string): Promise<MediaItem[]> {
 export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
   // ID format: hcseries-{hardcover_series_id}
   const seriesId = parseInt(item.id.replace('hcseries-', ''), 10)
+  // Display title may be "Series Name — Author Name"; extract just the series name.
+  const seriesName = item.title.split(' — ')[0].trim()
 
-  const data = await hardcoverQuery(`
-    query($id: Int!) {
-      book_series(
-        where: { series_id: { _eq: $id } }
-        order_by: { position: asc }
-      ) {
-        position
-        book {
-          id
-          title
-          release_date
-          users_count
-          compilation
-          image { url }
-          cached_contributors
+  // Run both queries in parallel:
+  //   1. Official book_series entries (volumes linked in Hardcover's database)
+  //   2. Title-prefix book search (picks up volumes with series_ids: [] in Typesense)
+  const [seriesData, bookSearchData] = await Promise.all([
+    hardcoverQuery<{ book_series: any[] }>(`
+      query($id: Int!) {
+        book_series(
+          where: { series_id: { _eq: $id } }
+          order_by: { position: asc }
+        ) {
+          position
+          book {
+            id
+            title
+            release_date
+            users_count
+            compilation
+            image { url }
+            cached_contributors
+          }
         }
       }
-    }
-  `, { id: seriesId })
+    `, { id: seriesId }),
+    hardcoverQuery(`
+      query($q: String!) {
+        search(query: $q, query_type: "Book", per_page: 40) {
+          results
+        }
+      }
+    `, { q: seriesName }),
+  ])
 
-  const allBooks: any[] = data?.book_series ?? []
+  const allBooks: any[] = seriesData?.book_series ?? []
 
-  // Deduplicate: many editions/translations share the same position.
-  // Priority: 1) skip compilations/omnibuses, 2) skip non-Latin titles
-  // (Japanese, Chinese, Korean, Arabic), 3) prefer highest users_count.
-  const NON_LATIN = /[⺀-鿿가-힯豈-﫿]/
+  // Deduplicate official entries: many editions share the same position.
+  // Priority: 1) skip compilations/omnibuses, 2) skip non-Latin titles,
+  // 3) prefer highest users_count.
+  const NON_LATIN = /[⺀-鿿가-힯豈-﫿぀-ヿ]/
   const positionMap = new Map<number, any>()
   for (const bs of allBooks) {
     const pos = bs.position
@@ -520,6 +549,50 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
     const existing = positionMap.get(pos)
     if (!existing || (bs.book.users_count ?? 0) > (existing.book.users_count ?? 0)) {
       positionMap.set(pos, bs)
+    }
+  }
+
+  // Supplementary volumes: books found by title-prefix search that have
+  // series_ids: [] in Typesense (Hardcover data gap). Parse the volume number
+  // from the book title and slot them into positions not covered by official data.
+  const officialPositions = new Set(positionMap.keys())
+  const bookResults: any[] = (bookSearchData?.search?.results?.hits ?? []).map((h: any) => h.document)
+  const officialBookIds = new Set(allBooks.map((bs: any) => String(bs.book.id)))
+  const snLower = seriesName.toLowerCase()
+
+  function parseVolumePos(bookTitle: string): number | null {
+    const titleLower = (bookTitle ?? '').toLowerCase().trim()
+    if (!titleLower.startsWith(snLower)) return null
+    const rest = bookTitle.slice(seriesName.length).trim()
+    // Bare series title with no suffix → volume 1
+    if (!rest) return 1
+    // Match " Vol N", " Volume N", plain " N:", " N -", or just " N" at end
+    const m = rest.match(/^,?\s*(?:vol\.?\s*|volume\s*)?(\d+)\s*(?:[:\-–—,\s]|$)/i)
+    return m ? parseInt(m[1], 10) : null
+  }
+
+  for (const b of bookResults) {
+    if (officialBookIds.has(String(b.id))) continue   // already in official data
+    if (NON_LATIN.test(b.title ?? '')) continue
+    if (b.compilation === true) continue
+    const pos = parseVolumePos(b.title ?? '')
+    if (pos === null || pos <= 0) continue
+    if (officialPositions.has(pos)) continue          // official entry takes priority
+    // Among supplementary candidates for the same position, prefer highest users_count
+    const existing = positionMap.get(pos)
+    if (!existing || (b.users_count ?? 0) > (existing.book.users_count ?? 0)) {
+      positionMap.set(pos, {
+        position: pos,
+        book: {
+          id: b.id,
+          title: b.title,
+          release_date: b.release_date ?? null,
+          users_count: b.users_count ?? 0,
+          compilation: false,
+          image: b.image ?? null,
+          cached_contributors: b.author_names?.[0] ? [{ name: b.author_names[0] }] : [],
+        },
+      })
     }
   }
 
