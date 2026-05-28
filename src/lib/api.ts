@@ -218,8 +218,6 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       }
     }
 
-    console.log('[manga] detected series IDs:', [...mangaSeriesIds])
-
     // Filter out omnibus / boxset / collection series — repackaged editions,
     // not the canonical reading order.
     const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
