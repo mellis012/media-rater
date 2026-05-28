@@ -151,14 +151,14 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const [seriesRes, bookRes] = await Promise.all([
       hardcoverQuery(`
         query($q: String!) {
-          search(query: $q, query_type: "Series", per_page: 10) {
+          search(query: $q, query_type: "Series", per_page: 20) {
             results
           }
         }
       `, { q }),
       hardcoverQuery(`
         query($q: String!) {
-          search(query: $q, query_type: "Book", per_page: 20) {
+          search(query: $q, query_type: "Book", per_page: 40) {
             results
           }
         }
@@ -169,12 +169,32 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    // Detect manga/manhwa/manhua series: check genres on book results.
-    // Books whose genres include manga keywords tell us which series IDs are manga.
+    // Detect manga/manhwa/manhua series using featured_series from book docs.
+    // featured_series is the book's PRIMARY series — more precise than series_ids,
+    // which can include a novel series on a manhwa adaptation and cause false positives.
     const mangaSeriesIds = new Set<number>()
     for (const b of bookResults) {
-      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
+      const isComics = (b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))
+      if (!isComics) continue
+      if (b.featured_series != null) {
+        mangaSeriesIds.add(Number(b.featured_series))
+      } else {
         for (const sid of b.series_ids ?? []) mangaSeriesIds.add(sid)
+      }
+    }
+
+    // Propagate: if a series in these results is manga, mark other series by
+    // the same author as manga too — catches spin-offs like Blue Lock: Episode Nagi
+    // whose volumes don't appear in the top book results.
+    const mangaAuthors = new Set<string>()
+    for (const s of seriesResults) {
+      if (mangaSeriesIds.has(parseInt(s.id, 10)) && s.author_name) {
+        mangaAuthors.add(s.author_name.toLowerCase())
+      }
+    }
+    for (const s of seriesResults) {
+      if (s.author_name && mangaAuthors.has(s.author_name.toLowerCase())) {
+        mangaSeriesIds.add(parseInt(s.id, 10))
       }
     }
 
@@ -197,10 +217,17 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       }
     })
 
+    // Solo books: not part of any series in these results.
+    // Deduplicate by title+author to avoid showing multiple editions.
+    const seenBookKeys = new Set<string>()
     const soloBooks: MediaItem[] = bookResults
-      .filter((b: any) =>
-        !(b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))
-      )
+      .filter((b: any) => {
+        if ((b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))) return false
+        const key = `${(b.title ?? '').toLowerCase()}|${(b.author_names?.[0] ?? '').toLowerCase()}`
+        if (seenBookKeys.has(key)) return false
+        seenBookKeys.add(key)
+        return true
+      })
       .map((b: any) => ({
         id: `hcbook-${b.id}`,
         title: b.author_names?.[0]
