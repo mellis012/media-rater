@@ -258,7 +258,8 @@ async function searchHardcover(
   const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
   const filteredSeries = seriesResults.filter((s: any) => !OMNIBUS_RE.test(s.name ?? ''))
 
-  // foundSeriesIds must include every merged id so solo-book filtering works.
+  // foundSeriesIds stays FULLY inclusive (all series IDs, genre-unfiltered) so that
+  // volumes belonging to hidden series are still suppressed as solo cards.
   const foundSeriesIds = new Set<number>()
   for (const s of filteredSeries) {
     for (const id of (s._allIds as number[])) foundSeriesIds.add(id)
@@ -273,7 +274,39 @@ async function searchHardcover(
     }
   }
 
-  const seriesItems: MediaItem[] = filteredSeries.map((s: any) => {
+  // ── Genre filter for explicit category modes ──────────────────────────────
+  // For manga/manhwa/manhua: hide series whose book evidence is entirely prose.
+  // For novel/light-novel/webnovel: hide series whose book evidence is entirely comics.
+  // A series with no book evidence (nothing in the top-40 results) is always shown
+  // — we can't determine its genre so we leave it in.
+  const COMICS_RE = /manga|manhwa|manhua|comics/i
+  const seriesHasComics = new Set<number>()   // series with ≥1 comics-genre book
+  const seriesHasNonComics = new Set<number>() // series with ≥1 non-comics book
+  if (forceSeriesType !== 'auto') {
+    for (const b of bookResults) {
+      const isComics = (b.genres ?? []).some((g: string) => COMICS_RE.test(g))
+      for (const sid of primarySids(b)) {
+        if (isComics) seriesHasComics.add(sid)
+        else seriesHasNonComics.add(sid)
+      }
+    }
+  }
+
+  const displaySeries = filteredSeries.filter((s: any) => {
+    if (forceSeriesType === 'auto') return true
+    const ids = s._allIds as number[]
+    const hasComics    = ids.some(id => seriesHasComics.has(id))
+    const hasNonComics = ids.some(id => seriesHasNonComics.has(id))
+    if (forceSeriesType === 'manga-series') {
+      // Exclude only when every book we saw is non-comics (definitely prose).
+      return !(hasNonComics && !hasComics)
+    } else {
+      // Exclude only when every book we saw is comics (definitely manga/manhwa).
+      return !(hasComics && !hasNonComics)
+    }
+  })
+
+  const seriesItems: MediaItem[] = displaySeries.map((s: any) => {
     const isManga =
       forceSeriesType === 'manga-series' ||
       (forceSeriesType === 'auto' && (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id)))
@@ -288,10 +321,17 @@ async function searchHardcover(
 
   // Solo books: not part of any series in these results.
   // Deduplicate by title+author to avoid showing multiple editions.
+  // For explicit categories, also filter by book genre.
   const seenBookKeys = new Set<string>()
   const soloBooks: MediaItem[] = bookResults
     .filter((b: any) => {
       if ((b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))) return false
+      // Genre gate: in comics modes keep only comics books; in prose modes exclude them.
+      if (forceSeriesType !== 'auto') {
+        const isComics = (b.genres ?? []).some((g: string) => COMICS_RE.test(g))
+        if (forceSeriesType === 'manga-series' && !isComics && (b.genres ?? []).length > 0) return false
+        if (forceSeriesType === 'book-series'  &&  isComics) return false
+      }
       const key = `${(b.title ?? '').toLowerCase()}|${(b.author_names?.[0] ?? '').toLowerCase()}`
       if (seenBookKeys.has(key)) return false
       seenBookKeys.add(key)
