@@ -184,7 +184,6 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const mangaSeriesIds = new Set<number>()
     for (const b of bookResults) {
       if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
-        console.log('[manga] comic:', b.title?.slice(0, 35), '| fs.series.id:', b.featured_series?.series?.id, '| series_ids:', b.series_ids)
         for (const sid of primarySids(b)) mangaSeriesIds.add(sid)
       }
     }
@@ -209,6 +208,19 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
         mangaSeriesIds.add(parseInt(s.id, 10))
       }
     }
+
+    // Demote adaptation series: if a series name carries an explicit format label
+    // like "(Manhwa)", "(Manhua)", "(Manga)", "(Webtoon)" it is a secondary adaptation
+    // of a source work — keep it as book-series so it doesn't shadow the original.
+    // Original manga like "Blue Lock" or "Vinland Saga" have no such parenthetical.
+    const FORMAT_LABEL_RE = /\((manhwa|manhua|manga|webtoon|comic)/i
+    for (const s of seriesResults) {
+      if (FORMAT_LABEL_RE.test(s.name ?? '')) {
+        mangaSeriesIds.delete(parseInt(s.id, 10))
+      }
+    }
+
+    console.log('[manga] detected series IDs:', [...mangaSeriesIds])
 
     // Filter out omnibus / boxset / collection series — repackaged editions,
     // not the canonical reading order.
