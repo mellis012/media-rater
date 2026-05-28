@@ -111,6 +111,205 @@ export async function fetchReleaseYear(r: Rating): Promise<number | null> {
   return null
 }
 
+// ── Hardcover book / series search ──────────────────────────────────────────
+// Shared by all book-like categories: novel, manga, manhwa, manhua,
+// light-novel, webnovel, and the legacy generic "book" category.
+//
+// forceSeriesType:
+//   'auto'         – run full manga-detection heuristics (legacy behaviour)
+//   'manga-series' – treat every series as manga/manhwa/manhua; skip detection
+//   'book-series'  – treat every series as prose; skip detection
+async function searchHardcover(
+  q: string,
+  forceSeriesType: 'auto' | 'manga-series' | 'book-series'
+): Promise<MediaItem[]> {
+  const [seriesRes, bookRes] = await Promise.all([
+    hardcoverQuery(`
+      query($q: String!) {
+        search(query: $q, query_type: "Series", per_page: 20) {
+          results
+        }
+      }
+    `, { q }),
+    hardcoverQuery(`
+      query($q: String!) {
+        search(query: $q, query_type: "Book", per_page: 40) {
+          results
+        }
+      }
+    `, { q }),
+  ])
+
+  // Results are Typesense hits: { results: { hits: [{ document: {...} }] } }
+  // Deduplicate series in three passes:
+  //   1. ID-dedup: same series can appear once per author → merge authors.
+  //   2. Name-dedup (Latin only): same real-world series can have multiple
+  //      Hardcover records (e.g. one per author credit) → merge, track all ids.
+  //   3. CJK absorption: Japanese/Chinese titles like "ブルーロック [Blue Lock]"
+  //      have the Latin name in brackets. We absorb their IDs into the matching
+  //      Latin entry so manga-detection and foundSeriesIds stay correct even
+  //      though we don't display the CJK card.
+  const NON_LATIN_SERIES = /[⺀-鿿가-힯豈-﫿぀-ヿ]/
+  const rawSeriesHits: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
+
+  // Pass 1 — id dedup
+  const seriesById = new Map<number, any>()
+  for (const s of rawSeriesHits) {
+    const sid = parseInt(s.id, 10)
+    if (!seriesById.has(sid)) {
+      seriesById.set(sid, { ...s, _mergedAuthors: s.author_name ? [s.author_name] : [] })
+    } else if (s.author_name) {
+      const e = seriesById.get(sid)!
+      if (!e._mergedAuthors.includes(s.author_name)) e._mergedAuthors.push(s.author_name)
+    }
+  }
+
+  // Pass 2 — name dedup (Latin entries only, for display)
+  const seriesByName = new Map<string, { entry: any; ids: number[]; authors: string[] }>()
+  for (const [sid, s] of seriesById) {
+    if (NON_LATIN_SERIES.test(s.name ?? '')) continue
+    const key = (s.name ?? '').toLowerCase().trim()
+    if (!seriesByName.has(key)) {
+      seriesByName.set(key, { entry: s, ids: [sid], authors: s._mergedAuthors })
+    } else {
+      const m = seriesByName.get(key)!
+      if (!m.ids.includes(sid)) m.ids.push(sid)
+      for (const a of s._mergedAuthors) if (!m.authors.includes(a)) m.authors.push(a)
+    }
+  }
+
+  // Pass 3 — absorb CJK ids into matching Latin entries via bracket content
+  // e.g. "ブルーロック [Blue Lock]" → bracket = "blue lock" → absorbed into Latin "Blue Lock"
+  for (const [sid, s] of seriesById) {
+    if (!NON_LATIN_SERIES.test(s.name ?? '')) continue
+    const bracketMatch = (s.name ?? '').match(/\[([^\]]+)\]/)
+    if (!bracketMatch) continue
+    const bracketKey = bracketMatch[1].toLowerCase().trim()
+    // exact match first, then fuzzy (spaces stripped) for "Bluelock" vs "Blue Lock"
+    const targetKey = seriesByName.has(bracketKey)
+      ? bracketKey
+      : [...seriesByName.keys()].find(k => k.replace(/\s/g, '') === bracketKey.replace(/\s/g, ''))
+    if (targetKey) {
+      const m = seriesByName.get(targetKey)!
+      if (!m.ids.includes(sid)) m.ids.push(sid)
+    }
+  }
+
+  const seriesResults: any[] = Array.from(seriesByName.values()).map(({ entry, ids, authors }) => ({
+    ...entry,
+    _allIds: ids,
+    author_name: authors.length > 0 ? authors.join(', ') : null,
+  }))
+  const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
+
+  // ── Manga detection (auto mode only) ────────────────────────────────────
+  // When the user explicitly chose manga/manhwa/novel etc., skip this entirely —
+  // the category selection IS the signal.
+  function primarySids(b: any): number[] {
+    const pid: unknown = b.featured_series?.series?.id
+    if (typeof pid === 'number' && pid > 0) return [pid]
+    return ((b.series_ids ?? []) as number[]).filter(id => id > 0)
+  }
+  const mangaSeriesIds = new Set<number>()
+  if (forceSeriesType === 'auto') {
+    // Pass 1: collect series IDs from comics-genre books.
+    for (const b of bookResults) {
+      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
+        for (const sid of primarySids(b)) mangaSeriesIds.add(sid)
+      }
+    }
+    // Pass 2: disqualify any series that also has non-comics books (e.g. LotM).
+    for (const b of bookResults) {
+      if (!(b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
+        for (const sid of primarySids(b)) mangaSeriesIds.delete(sid)
+      }
+    }
+    // Demote adaptation series BEFORE author propagation: a series name with an
+    // explicit format label like "(Manhwa)" is a secondary adaptation — remove it
+    // so it can't seed mangaAuthors and accidentally tag the source novel as manga.
+    const FORMAT_LABEL_RE = /\((manhwa|manhua|manga|webtoon|comic)/i
+    for (const s of seriesResults) {
+      if (FORMAT_LABEL_RE.test(s.name ?? '')) {
+        for (const id of (s._allIds as number[])) mangaSeriesIds.delete(id)
+      }
+    }
+    // Propagate: if any series in these results is manga, mark other series by the
+    // same author as manga too — catches spin-offs whose volumes don't appear in
+    // the top book results (e.g. Blue Lock: Episode Nagi).
+    const mangaAuthors = new Set<string>()
+    for (const s of seriesResults) {
+      const isManga = (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id))
+      if (isManga && s.author_name) {
+        for (const a of (s.author_name as string).split(',')) mangaAuthors.add(a.toLowerCase().trim())
+      }
+    }
+    for (const s of seriesResults) {
+      if (s.author_name) {
+        const parts = (s.author_name as string).split(',').map((a: string) => a.toLowerCase().trim())
+        if (parts.some((a: string) => mangaAuthors.has(a))) {
+          for (const id of (s._allIds as number[])) mangaSeriesIds.add(id)
+        }
+      }
+    }
+  }
+
+  // Filter out omnibus / boxset / collection series — repackaged editions,
+  // not the canonical reading order.
+  const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
+  const filteredSeries = seriesResults.filter((s: any) => !OMNIBUS_RE.test(s.name ?? ''))
+
+  // foundSeriesIds must include every merged id so solo-book filtering works.
+  const foundSeriesIds = new Set<number>()
+  for (const s of filteredSeries) {
+    for (const id of (s._allIds as number[])) foundSeriesIds.add(id)
+  }
+  // Transitively expand: if a book's primary series is already known, absorb all
+  // its other series_ids too — catches volumes that cross-reference multiple series
+  // records for the same real-world series (e.g. CJK variants without brackets).
+  for (const b of bookResults) {
+    const primary = primarySids(b)
+    if (primary.some((id: number) => foundSeriesIds.has(id) || mangaSeriesIds.has(id))) {
+      for (const sid of (b.series_ids ?? []) as number[]) foundSeriesIds.add(sid)
+    }
+  }
+
+  const seriesItems: MediaItem[] = filteredSeries.map((s: any) => {
+    const isManga =
+      forceSeriesType === 'manga-series' ||
+      (forceSeriesType === 'auto' && (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id)))
+    return {
+      id: `hcseries-${s.id}`,
+      title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
+      image: s.author?.image?.url ?? null,
+      type: isManga ? 'manga-series' as const : 'book-series' as const,
+      release_year: null,
+    }
+  })
+
+  // Solo books: not part of any series in these results.
+  // Deduplicate by title+author to avoid showing multiple editions.
+  const seenBookKeys = new Set<string>()
+  const soloBooks: MediaItem[] = bookResults
+    .filter((b: any) => {
+      if ((b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))) return false
+      const key = `${(b.title ?? '').toLowerCase()}|${(b.author_names?.[0] ?? '').toLowerCase()}`
+      if (seenBookKeys.has(key)) return false
+      seenBookKeys.add(key)
+      return true
+    })
+    .map((b: any) => ({
+      id: `hcbook-${b.id}`,
+      title: b.author_names?.[0]
+        ? `${b.title} — ${b.author_names[0]}`
+        : b.title,
+      image: b.image?.url ?? null,
+      type: 'book' as const,
+      release_year: b.release_year ?? yearFrom(b.release_date),
+    }))
+
+  return [...seriesItems, ...soloBooks]
+}
+
 export async function searchMedia(q: string, category: string): Promise<MediaItem[]> {
   if (category === 'movie') {
     // Fetch 2 pages concurrently for ~40 results
@@ -145,197 +344,20 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     }))
   }
 
-  if (category === 'book') {
-    // Use Hardcover's search query — _ilike is disabled on their public API.
-    // Search series and books in parallel; series cards come first.
-    const [seriesRes, bookRes] = await Promise.all([
-      hardcoverQuery(`
-        query($q: String!) {
-          search(query: $q, query_type: "Series", per_page: 20) {
-            results
-          }
-        }
-      `, { q }),
-      hardcoverQuery(`
-        query($q: String!) {
-          search(query: $q, query_type: "Book", per_page: 40) {
-            results
-          }
-        }
-      `, { q }),
-    ])
-
-    // Results are Typesense hits: { results: { hits: [{ document: {...} }] } }
-    // Deduplicate series in three passes:
-    //   1. ID-dedup: same series can appear once per author → merge authors.
-    //   2. Name-dedup (Latin only): same real-world series can have multiple
-    //      Hardcover records (e.g. one per author credit) → merge, track all ids.
-    //   3. CJK absorption: Japanese/Chinese titles like "ブルーロック [Blue Lock]"
-    //      have the Latin name in brackets. We absorb their IDs into the matching
-    //      Latin entry so manga-detection and foundSeriesIds stay correct even
-    //      though we don't display the CJK card.
-    const NON_LATIN_SERIES = /[⺀-鿿가-힯豈-﫿぀-ヿ]/
-    const rawSeriesHits: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
-
-    // Pass 1 — id dedup
-    const seriesById = new Map<number, any>()
-    for (const s of rawSeriesHits) {
-      const sid = parseInt(s.id, 10)
-      if (!seriesById.has(sid)) {
-        seriesById.set(sid, { ...s, _mergedAuthors: s.author_name ? [s.author_name] : [] })
-      } else if (s.author_name) {
-        const e = seriesById.get(sid)!
-        if (!e._mergedAuthors.includes(s.author_name)) e._mergedAuthors.push(s.author_name)
-      }
-    }
-
-    // Pass 2 — name dedup (Latin entries only, for display)
-    const seriesByName = new Map<string, { entry: any; ids: number[]; authors: string[] }>()
-    for (const [sid, s] of seriesById) {
-      if (NON_LATIN_SERIES.test(s.name ?? '')) continue
-      const key = (s.name ?? '').toLowerCase().trim()
-      if (!seriesByName.has(key)) {
-        seriesByName.set(key, { entry: s, ids: [sid], authors: s._mergedAuthors })
-      } else {
-        const m = seriesByName.get(key)!
-        if (!m.ids.includes(sid)) m.ids.push(sid)
-        for (const a of s._mergedAuthors) if (!m.authors.includes(a)) m.authors.push(a)
-      }
-    }
-
-    // Pass 3 — absorb CJK ids into matching Latin entries via bracket content
-    // e.g. "ブルーロック [Blue Lock]" → bracket = "blue lock" → absorbed into Latin "Blue Lock"
-    for (const [sid, s] of seriesById) {
-      if (!NON_LATIN_SERIES.test(s.name ?? '')) continue
-      const bracketMatch = (s.name ?? '').match(/\[([^\]]+)\]/)
-      if (!bracketMatch) continue
-      const bracketKey = bracketMatch[1].toLowerCase().trim()
-      // exact match first, then fuzzy (spaces stripped) for "Bluelock" vs "Blue Lock"
-      const targetKey = seriesByName.has(bracketKey)
-        ? bracketKey
-        : [...seriesByName.keys()].find(k => k.replace(/\s/g, '') === bracketKey.replace(/\s/g, ''))
-      if (targetKey) {
-        const m = seriesByName.get(targetKey)!
-        if (!m.ids.includes(sid)) m.ids.push(sid)
-      }
-    }
-
-    const seriesResults: any[] = Array.from(seriesByName.values()).map(({ entry, ids, authors }) => ({
-      ...entry,
-      _allIds: ids,
-      author_name: authors.length > 0 ? authors.join(', ') : null,
-    }))
-    const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
-
-    // Detect manga/manhwa/manhua series with a two-pass approach.
-    // Use featured_series.series.id (the book's PRIMARY series) when available — this
-    // avoids the ORV false-positive where manhwa volumes have the novel series ID in
-    // series_ids but their featured/primary series is the manhwa series.
-    // Fall back to series_ids only when featured_series is not set.
-    // Pass 2 disqualifies any series that also has non-comics books in the same
-    // primary-series slot (handles LotM where novel + manhua share the same series).
-    function primarySids(b: any): number[] {
-      const pid: unknown = b.featured_series?.series?.id
-      if (typeof pid === 'number' && pid > 0) return [pid]
-      return ((b.series_ids ?? []) as number[]).filter(id => id > 0)
-    }
-    const mangaSeriesIds = new Set<number>()
-    for (const b of bookResults) {
-      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
-        for (const sid of primarySids(b)) mangaSeriesIds.add(sid)
-      }
-    }
-    for (const b of bookResults) {
-      if (!(b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
-        for (const sid of primarySids(b)) mangaSeriesIds.delete(sid)
-      }
-    }
-    // Demote adaptation series BEFORE author propagation: if a series name carries
-    // an explicit format label like "(Manhwa)", "(Manhua)", "(Manga)", "(Webtoon)"
-    // it is a secondary adaptation — remove it so it can't seed the author list
-    // and accidentally tag the source novel series as manga via propagation.
-    const FORMAT_LABEL_RE = /\((manhwa|manhua|manga|webtoon|comic)/i
-    for (const s of seriesResults) {
-      if (FORMAT_LABEL_RE.test(s.name ?? '')) {
-        for (const id of (s._allIds as number[])) mangaSeriesIds.delete(id)
-      }
-    }
-
-    // Propagate: if a series in these results is manga, mark other series by
-    // the same author as manga too — catches spin-offs like Blue Lock: Episode Nagi
-    // whose volumes don't appear in the top book results.
-    // author_name may be "A, B" after merging — split and check each part.
-    const mangaAuthors = new Set<string>()
-    for (const s of seriesResults) {
-      const isManga = (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id))
-      if (isManga && s.author_name) {
-        for (const a of (s.author_name as string).split(',')) mangaAuthors.add(a.toLowerCase().trim())
-      }
-    }
-    for (const s of seriesResults) {
-      if (s.author_name) {
-        const parts = (s.author_name as string).split(',').map((a: string) => a.toLowerCase().trim())
-        if (parts.some((a: string) => mangaAuthors.has(a))) {
-          for (const id of (s._allIds as number[])) mangaSeriesIds.add(id)
-        }
-      }
-    }
-
-    // Filter out omnibus / boxset / collection series — repackaged editions,
-    // not the canonical reading order.
-    const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
-    const filteredSeries = seriesResults.filter((s: any) => !OMNIBUS_RE.test(s.name ?? ''))
-
-    // foundSeriesIds must include every merged id so solo-book filtering works.
-    const foundSeriesIds = new Set<number>()
-    for (const s of filteredSeries) {
-      for (const id of (s._allIds as number[])) foundSeriesIds.add(id)
-    }
-
-    // Transitively expand foundSeriesIds: if a book's primary series is already known,
-    // absorb all its other series_ids too — catches volumes that cross-reference
-    // multiple series records for the same real-world series (e.g. CJK variants
-    // without brackets that couldn't be absorbed during the three-pass dedup).
-    for (const b of bookResults) {
-      const primary = primarySids(b)
-      if (primary.some((id: number) => foundSeriesIds.has(id) || mangaSeriesIds.has(id))) {
-        for (const sid of (b.series_ids ?? []) as number[]) foundSeriesIds.add(sid)
-      }
-    }
-
-    const seriesItems: MediaItem[] = filteredSeries.map((s: any) => {
-      const isManga = (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id))
-      return {
-        id: `hcseries-${s.id}`,
-        title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
-        image: s.author?.image?.url ?? null,
-        type: isManga ? 'manga-series' as const : 'book-series' as const,
-        release_year: null,
-      }
-    })
-
-    // Solo books: not part of any series in these results.
-    // Deduplicate by title+author to avoid showing multiple editions.
-    const seenBookKeys = new Set<string>()
-    const soloBooks: MediaItem[] = bookResults
-      .filter((b: any) => {
-        if ((b.series_ids ?? []).some((id: number) => foundSeriesIds.has(id))) return false
-        const key = `${(b.title ?? '').toLowerCase()}|${(b.author_names?.[0] ?? '').toLowerCase()}`
-        if (seenBookKeys.has(key)) return false
-        seenBookKeys.add(key)
-        return true
-      })
-      .map((b: any) => ({
-        id: `hcbook-${b.id}`,
-        title: b.author_names?.[0]
-          ? `${b.title} — ${b.author_names[0]}`
-          : b.title,
-        image: b.image?.url ?? null,
-        type: 'book' as const,
-        release_year: b.release_year ?? yearFrom(b.release_date),
-      }))
-
-    return [...seriesItems, ...soloBooks]
+  // ── Book-like categories → Hardcover ─────────────────────────────────────
+  // 'book' kept for backward compatibility (auto-detection).
+  // Explicit subcategories bypass detection: the user's category choice IS the signal.
+  const HARDCOVER_SERIES_TYPE: Record<string, 'auto' | 'manga-series' | 'book-series'> = {
+    book:           'auto',
+    novel:          'book-series',
+    'light-novel':  'book-series',
+    webnovel:       'book-series',
+    manga:          'manga-series',
+    manhwa:         'manga-series',
+    manhua:         'manga-series',
+  }
+  if (category in HARDCOVER_SERIES_TYPE) {
+    return searchHardcover(q, HARDCOVER_SERIES_TYPE[category])
   }
 
   if (category === 'game') {

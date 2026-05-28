@@ -1,12 +1,15 @@
 import { type KeyboardEvent } from 'react'
-import type { MediaCategory } from '../../types'
 
-const CATEGORIES: { value: MediaCategory | 'tv'; label: string }[] = [
-  { value: 'movie', label: 'Movies' },
-  { value: 'tv', label: 'TV Shows' },
-  { value: 'book', label: 'Books' },
-  { value: 'game', label: 'Games' },
-  { value: 'artist', label: 'Artists' },
+const CATEGORIES: { value: string; label: string }[] = [
+  { value: 'movie',       label: 'Movies' },
+  { value: 'tv',          label: 'TV Shows' },
+  { value: 'novel',       label: 'Novels' },
+  { value: 'light-novel', label: 'Light Novels' },
+  { value: 'manga',       label: 'Manga' },
+  { value: 'manhwa',      label: 'Manhwa' },
+  { value: 'webnovel',    label: 'Webnovels' },
+  { value: 'game',        label: 'Games' },
+  { value: 'artist',      label: 'Artists' },
 ]
 
 interface Props {
