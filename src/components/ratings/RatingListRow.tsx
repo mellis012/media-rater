@@ -19,6 +19,18 @@ interface Props {
   onDeleteCancel?: () => void
 }
 
+const CATEGORY_LABEL: Record<string, string> = {
+  'movie':        'Movie',
+  'tv':           'TV Show',
+  'tv-season':    'TV Season',
+  'book':         'Book',
+  'book-series':  'Novel',
+  'manga-series': 'Graphic Novel',
+  'game':         'Game',
+  'artist':       'Artist',
+  'album':        'Album',
+}
+
 export function ratingColor(r: number) {
   if (r >= 8) return 'text-green-400'
   if (r >= 6) return 'text-yellow-400'
@@ -68,7 +80,7 @@ export default function RatingListRow({
       <div className="flex-1 min-w-0">
         <p className="text-white text-sm font-medium truncate leading-snug">{r.title}</p>
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-slate-500 uppercase tracking-wider">{r.category}</span>
+          <span className="text-[11px] text-slate-500 uppercase tracking-wider">{CATEGORY_LABEL[r.category] ?? r.category}</span>
           {r.release_year && (
             <span className="text-[11px] text-slate-600">{r.release_year}</span>
           )}

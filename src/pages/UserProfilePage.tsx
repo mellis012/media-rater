@@ -6,12 +6,14 @@ import { sortRatings, SORT_OPTIONS, type SortKey } from '../lib/sort'
 import type { Rating, MediaCategory } from '../types'
 
 const FILTER_OPTIONS: { value: 'all' | MediaCategory; label: string }[] = [
-  { value: 'all',       label: 'All' },
-  { value: 'movie',     label: 'Movies' },
-  { value: 'tv-season', label: 'TV Seasons' },
-  { value: 'book',      label: 'Books' },
-  { value: 'game',      label: 'Games' },
-  { value: 'album',     label: 'Albums' },
+  { value: 'all',          label: 'All' },
+  { value: 'movie',        label: 'Movies' },
+  { value: 'tv-season',    label: 'TV Seasons' },
+  { value: 'book',         label: 'Books' },
+  { value: 'book-series',  label: 'Novels' },
+  { value: 'manga-series', label: 'Graphic Novels' },
+  { value: 'game',         label: 'Games' },
+  { value: 'album',        label: 'Albums' },
 ]
 
 export default function UserProfilePage() {
