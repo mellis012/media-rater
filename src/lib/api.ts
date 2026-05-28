@@ -169,20 +169,23 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    // Detect manga/manhwa/manhua series using featured_series from book docs.
-    // featured_series is the book's PRIMARY series — more precise than series_ids,
-    // which can include a novel series on a manhwa adaptation and cause false positives.
-    // Guard: featured_series must be a positive integer (0 means "not set" in Typesense).
+    // Detect manga/manhwa/manhua series with a two-pass approach on bookResults:
+    // Pass 1 — collect series IDs that have at least one comics-genre book.
+    // Pass 2 — disqualify any series that ALSO has non-comics books (prose novels
+    //           sharing the same series_id as an adaptation, e.g. LotM/ORV).
     const mangaSeriesIds = new Set<number>()
     for (const b of bookResults) {
-      const isComics = (b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))
-      if (!isComics) continue
-      const fs = Number(b.featured_series)
-      console.log('[manga] comic book:', b.title?.slice(0, 40), '| featured_series:', b.featured_series, '| fs_num:', fs, '| series_ids:', b.series_ids)
-      if (fs > 0) {
-        mangaSeriesIds.add(fs)
-      } else {
-        for (const sid of b.series_ids ?? []) mangaSeriesIds.add(sid)
+      if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
+        for (const sid of (b.series_ids ?? []) as number[]) {
+          if (sid > 0) mangaSeriesIds.add(sid)
+        }
+      }
+    }
+    for (const b of bookResults) {
+      if (!(b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
+        for (const sid of (b.series_ids ?? []) as number[]) {
+          mangaSeriesIds.delete(sid)
+        }
       }
     }
     console.log('[manga] detected series IDs:', [...mangaSeriesIds])
