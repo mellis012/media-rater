@@ -9,7 +9,13 @@ import type { MediaItem, MediaCategory } from '../types'
 export default function SearchPage() {
   const { user } = useAuth()
   const { saveRating, getUserRatingMap } = useRatings()
+
+  // Lifted here so the query/category survive the hero↔compact SearchBar remount
+  const [q, setQ] = useState('')
+  const [category, setCategory] = useState('movie')
+
   const [results, setResults] = useState<MediaItem[]>([])
+  const [prevResults, setPrevResults] = useState<MediaItem[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [drillParent, setDrillParent] = useState<MediaItem | null>(null)
   const [ratingMap, setRatingMap] = useState<Map<string, number>>(new Map())
@@ -18,11 +24,13 @@ export default function SearchPage() {
     if (user) getUserRatingMap(user.id).then(setRatingMap)
   }, [user, getUserRatingMap])
 
-  async function handleSearch(q: string, category: string) {
+  async function handleSearch() {
+    if (!q.trim()) return
     setLoading(true)
     setDrillParent(null)
+    setPrevResults(null)
     try {
-      const items = await searchMedia(q, category)
+      const items = await searchMedia(q.trim(), category)
       setResults(items)
     } catch {
       setResults([])
@@ -33,6 +41,7 @@ export default function SearchPage() {
 
   async function handleDrill(item: MediaItem) {
     setLoading(true)
+    setPrevResults(results)   // save so Back can restore
     setDrillParent(item)
     try {
       let children: MediaItem[] = []
@@ -44,6 +53,16 @@ export default function SearchPage() {
       setResults([])
     } finally {
       setLoading(false)
+    }
+  }
+
+  function handleBack() {
+    setDrillParent(null)
+    if (prevResults !== null) {
+      setResults(prevResults)
+      setPrevResults(null)
+    } else {
+      setResults([])
     }
   }
 
@@ -67,7 +86,11 @@ export default function SearchPage() {
             Movies, TV, books, games, music — all in one place.
           </p>
           <div className="max-w-xl mx-auto">
-            <SearchBar onSearch={handleSearch} loading={loading} />
+            <SearchBar
+              q={q} category={category}
+              onQChange={setQ} onCategoryChange={setCategory}
+              onSearch={handleSearch} loading={loading}
+            />
           </div>
         </div>
       )}
@@ -75,7 +98,11 @@ export default function SearchPage() {
       {/* Compact search bar when results are visible */}
       {hasResults && (
         <div className="py-4">
-          <SearchBar onSearch={handleSearch} loading={loading} />
+          <SearchBar
+            q={q} category={category}
+            onQChange={setQ} onCategoryChange={setCategory}
+            onSearch={handleSearch} loading={loading}
+          />
         </div>
       )}
 
@@ -83,7 +110,7 @@ export default function SearchPage() {
       {drillParent && (
         <div className="flex items-center gap-2 mb-4 text-sm">
           <button
-            onClick={() => { setDrillParent(null); setResults([]) }}
+            onClick={handleBack}
             className="text-purple-400 hover:text-purple-300 transition-colors"
           >
             ← Back
