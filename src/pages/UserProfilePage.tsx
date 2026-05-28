@@ -9,12 +9,18 @@ const FILTER_OPTIONS: { value: 'all' | MediaCategory; label: string }[] = [
   { value: 'all',          label: 'All' },
   { value: 'movie',        label: 'Movies' },
   { value: 'tv-season',    label: 'TV Seasons' },
-  { value: 'book',         label: 'Books' },
   { value: 'book-series',  label: 'Novels' },
   { value: 'manga-series', label: 'Graphic Novels' },
   { value: 'game',         label: 'Games' },
   { value: 'album',        label: 'Albums' },
 ]
+
+// 'book' (solo drilled volumes) and 'book-series' both count as Novels
+function matchesFilter(category: MediaCategory, filter: 'all' | MediaCategory): boolean {
+  if (filter === 'all') return true
+  if (filter === 'book-series') return category === 'book-series' || category === 'book'
+  return category === filter
+}
 
 export default function UserProfilePage() {
   const { username } = useParams<{ username: string }>()
@@ -38,7 +44,7 @@ export default function UserProfilePage() {
   }, [username, fetchPublicRatings])
 
   const filtered = useMemo(
-    () => filter === 'all' ? ratings : ratings.filter(r => r.category === filter),
+    () => ratings.filter(r => matchesFilter(r.category, filter)),
     [ratings, filter]
   )
   const displayed = useMemo(() => sortRatings(filtered, sort), [filtered, sort])
@@ -81,7 +87,9 @@ export default function UserProfilePage() {
           </div>
           {filter !== 'all' && (
             <div className="flex items-center gap-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full px-3 py-1">
-              <span className="text-purple-300 text-xs capitalize">{filter}</span>
+              <span className="text-purple-300 text-xs capitalize">
+                {FILTER_OPTIONS.find(o => o.value === filter)?.label ?? filter}
+              </span>
             </div>
           )}
         </div>
