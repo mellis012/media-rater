@@ -169,23 +169,28 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const seriesResults: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
-    // Detect manga/manhwa/manhua series with a two-pass approach on bookResults:
-    // Pass 1 — collect series IDs that have at least one comics-genre book.
-    // Pass 2 — disqualify any series that ALSO has non-comics books (prose novels
-    //           sharing the same series_id as an adaptation, e.g. LotM/ORV).
+    // Detect manga/manhwa/manhua series with a two-pass approach.
+    // Use featured_series.series.id (the book's PRIMARY series) when available — this
+    // avoids the ORV false-positive where manhwa volumes have the novel series ID in
+    // series_ids but their featured/primary series is the manhwa series.
+    // Fall back to series_ids only when featured_series is not set.
+    // Pass 2 disqualifies any series that also has non-comics books in the same
+    // primary-series slot (handles LotM where novel + manhua share the same series).
+    function primarySids(b: any): number[] {
+      const pid: unknown = b.featured_series?.series?.id
+      if (typeof pid === 'number' && pid > 0) return [pid]
+      return ((b.series_ids ?? []) as number[]).filter(id => id > 0)
+    }
     const mangaSeriesIds = new Set<number>()
     for (const b of bookResults) {
       if ((b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
-        for (const sid of (b.series_ids ?? []) as number[]) {
-          if (sid > 0) mangaSeriesIds.add(sid)
-        }
+        console.log('[manga] comic:', b.title?.slice(0, 35), '| fs.series.id:', b.featured_series?.series?.id, '| series_ids:', b.series_ids)
+        for (const sid of primarySids(b)) mangaSeriesIds.add(sid)
       }
     }
     for (const b of bookResults) {
       if (!(b.genres ?? []).some((g: string) => /manga|manhwa|manhua|comics/i.test(g))) {
-        for (const sid of (b.series_ids ?? []) as number[]) {
-          mangaSeriesIds.delete(sid)
-        }
+        for (const sid of primarySids(b)) mangaSeriesIds.delete(sid)
       }
     }
     console.log('[manga] detected series IDs:', [...mangaSeriesIds])
