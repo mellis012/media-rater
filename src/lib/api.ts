@@ -192,7 +192,16 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
         for (const sid of primarySids(b)) mangaSeriesIds.delete(sid)
       }
     }
-    console.log('[manga] detected series IDs:', [...mangaSeriesIds])
+    // Demote adaptation series BEFORE author propagation: if a series name carries
+    // an explicit format label like "(Manhwa)", "(Manhua)", "(Manga)", "(Webtoon)"
+    // it is a secondary adaptation — remove it so it can't seed the author list
+    // and accidentally tag the source novel series as manga via propagation.
+    const FORMAT_LABEL_RE = /\((manhwa|manhua|manga|webtoon|comic)/i
+    for (const s of seriesResults) {
+      if (FORMAT_LABEL_RE.test(s.name ?? '')) {
+        mangaSeriesIds.delete(parseInt(s.id, 10))
+      }
+    }
 
     // Propagate: if a series in these results is manga, mark other series by
     // the same author as manga too — catches spin-offs like Blue Lock: Episode Nagi
@@ -206,17 +215,6 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     for (const s of seriesResults) {
       if (s.author_name && mangaAuthors.has(s.author_name.toLowerCase())) {
         mangaSeriesIds.add(parseInt(s.id, 10))
-      }
-    }
-
-    // Demote adaptation series: if a series name carries an explicit format label
-    // like "(Manhwa)", "(Manhua)", "(Manga)", "(Webtoon)" it is a secondary adaptation
-    // of a source work — keep it as book-series so it doesn't shadow the original.
-    // Original manga like "Blue Lock" or "Vinland Saga" have no such parenthetical.
-    const FORMAT_LABEL_RE = /\((manhwa|manhua|manga|webtoon|comic)/i
-    for (const s of seriesResults) {
-      if (FORMAT_LABEL_RE.test(s.name ?? '')) {
-        mangaSeriesIds.delete(parseInt(s.id, 10))
       }
     }
 
