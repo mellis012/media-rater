@@ -166,22 +166,31 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     ])
 
     // Results are Typesense hits: { results: { hits: [{ document: {...} }] } }
-    // Deduplicate series by id — multi-author series (e.g. Blue Lock) return one
-    // hit per author; merge them into a single entry with joined author names.
+    // Deduplicate series by normalised name:
+    //   1. Skip non-Latin/CJK titles (ブルーロック etc.) — prefer the English entry.
+    //   2. Merge entries with the same name (same real-world series, separate
+    //      Hardcover records per author), track ALL ids and join author names.
+    //      Tracking all ids is required so manga-detection and foundSeriesIds
+    //      stay correct after the merge.
+    const NON_LATIN_SERIES = /[⺀-鿿가-힯豈-﫿぀-ヿ]/
     const rawSeriesHits: any[] = (seriesRes?.search?.results?.hits ?? []).map((h: any) => h.document)
-    const seriesById = new Map<number, any>()
+    const seriesByName = new Map<string, { entry: any; ids: number[]; authors: string[] }>()
     for (const s of rawSeriesHits) {
+      if (NON_LATIN_SERIES.test(s.name ?? '')) continue
+      const key = (s.name ?? '').toLowerCase().trim()
       const sid = parseInt(s.id, 10)
-      if (!seriesById.has(sid)) {
-        seriesById.set(sid, { ...s, _authors: s.author_name ? [s.author_name] : [] })
-      } else if (s.author_name) {
-        const existing = seriesById.get(sid)
-        if (!existing._authors.includes(s.author_name)) existing._authors.push(s.author_name)
+      if (!seriesByName.has(key)) {
+        seriesByName.set(key, { entry: s, ids: [sid], authors: s.author_name ? [s.author_name] : [] })
+      } else {
+        const m = seriesByName.get(key)!
+        if (!m.ids.includes(sid)) m.ids.push(sid)
+        if (s.author_name && !m.authors.includes(s.author_name)) m.authors.push(s.author_name)
       }
     }
-    const seriesResults: any[] = Array.from(seriesById.values()).map(s => ({
-      ...s,
-      author_name: s._authors.length > 0 ? s._authors.join(', ') : null,
+    const seriesResults: any[] = Array.from(seriesByName.values()).map(({ entry, ids, authors }) => ({
+      ...entry,
+      _allIds: ids,
+      author_name: authors.length > 0 ? authors.join(', ') : null,
     }))
     const bookResults: any[] = (bookRes?.search?.results?.hits ?? []).map((h: any) => h.document)
 
@@ -215,22 +224,27 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const FORMAT_LABEL_RE = /\((manhwa|manhua|manga|webtoon|comic)/i
     for (const s of seriesResults) {
       if (FORMAT_LABEL_RE.test(s.name ?? '')) {
-        mangaSeriesIds.delete(parseInt(s.id, 10))
+        for (const id of (s._allIds as number[])) mangaSeriesIds.delete(id)
       }
     }
 
     // Propagate: if a series in these results is manga, mark other series by
     // the same author as manga too — catches spin-offs like Blue Lock: Episode Nagi
     // whose volumes don't appear in the top book results.
+    // author_name may be "A, B" after merging — split and check each part.
     const mangaAuthors = new Set<string>()
     for (const s of seriesResults) {
-      if (mangaSeriesIds.has(parseInt(s.id, 10)) && s.author_name) {
-        mangaAuthors.add(s.author_name.toLowerCase())
+      const isManga = (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id))
+      if (isManga && s.author_name) {
+        for (const a of (s.author_name as string).split(',')) mangaAuthors.add(a.toLowerCase().trim())
       }
     }
     for (const s of seriesResults) {
-      if (s.author_name && mangaAuthors.has(s.author_name.toLowerCase())) {
-        mangaSeriesIds.add(parseInt(s.id, 10))
+      if (s.author_name) {
+        const parts = (s.author_name as string).split(',').map((a: string) => a.toLowerCase().trim())
+        if (parts.some((a: string) => mangaAuthors.has(a))) {
+          for (const id of (s._allIds as number[])) mangaSeriesIds.add(id)
+        }
       }
     }
 
@@ -239,16 +253,19 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
     const OMNIBUS_RE = /omnibus|box\s*set|boxed|deluxe|\d-in-\d|complete\s+series|collected/i
     const filteredSeries = seriesResults.filter((s: any) => !OMNIBUS_RE.test(s.name ?? ''))
 
-    // Series ids are strings in series docs but numbers in book.series_ids
-    const foundSeriesIds = new Set<number>(filteredSeries.map((s: any) => parseInt(s.id, 10)))
+    // foundSeriesIds must include every merged id so solo-book filtering works.
+    const foundSeriesIds = new Set<number>()
+    for (const s of filteredSeries) {
+      for (const id of (s._allIds as number[])) foundSeriesIds.add(id)
+    }
 
     const seriesItems: MediaItem[] = filteredSeries.map((s: any) => {
-      const sid = parseInt(s.id, 10)
+      const isManga = (s._allIds as number[]).some((id: number) => mangaSeriesIds.has(id))
       return {
         id: `hcseries-${s.id}`,
         title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
         image: s.author?.image?.url ?? null,
-        type: mangaSeriesIds.has(sid) ? 'manga-series' as const : 'book-series' as const,
+        type: isManga ? 'manga-series' as const : 'book-series' as const,
         release_year: null,
       }
     })
