@@ -192,7 +192,7 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
         id: `hcseries-${s.id}`,
         title: s.author_name ? `${s.name} — ${s.author_name}` : s.name,
         image: s.author?.image?.url ?? null,
-        type: (mangaSeriesIds.has(sid) ? 'manga-series' : 'book-series') as const,
+        type: mangaSeriesIds.has(sid) ? 'manga-series' as const : 'book-series' as const,
         release_year: null,
       }
     })
