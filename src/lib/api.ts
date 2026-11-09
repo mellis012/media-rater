@@ -1,7 +1,6 @@
 import type { MediaItem, Rating } from '../types'
 
 const TMDB_KEY = import.meta.env.VITE_TMDB_KEY as string
-const RAWG_KEY = import.meta.env.VITE_RAWG_KEY as string
 const GOOGLE_BOOKS_KEY = import.meta.env.VITE_GOOGLE_BOOKS_KEY as string // kept for legacy gb- ratings
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string
@@ -89,21 +88,14 @@ export async function fetchReleaseYear(r: Rating): Promise<number | null> {
     }
 
     if (r.category === 'game') {
-      const params = new URLSearchParams()
-      if (RAWG_KEY) params.set('key', RAWG_KEY)
-      const data = await fetch(
-        `https://api.rawg.io/api/games/${r.item_id}?${params}`
-      ).then(res => res.json())
-      return yearFrom(data.released)
+      // RAWG is no longer available; steam IDs carry no release date at search time.
+      return null
     }
 
     if (r.category === 'album') {
-      const albumId = r.item_id.replace('album-', '')
-      const data = await fetch(
-        `https://www.theaudiodb.com/api/v1/json/2/album.php?m=${albumId}`
-      ).then(res => res.json()).catch(() => ({}))
-      const yr = data.album?.[0]?.intYearReleased
-      return yr ? parseInt(yr, 10) : null
+      // iTunes albums already include release_year at save time; nothing to sync.
+      // Legacy TheAudioDB albums: that API no longer works with the free key.
+      return null
     }
   } catch {
     // Network error — skip this item
@@ -450,31 +442,38 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
   }
 
   if (category === 'game') {
-    const params = new URLSearchParams({ search: q, page_size: '40' })
-    if (RAWG_KEY) params.set('key', RAWG_KEY)
-    const res = await fetch(`https://api.rawg.io/api/games?${params}`)
+    // RAWG is no longer available; use Steam store search via proxy.
+    const res = await fetch(
+      `${SUPABASE_URL}/functions/v1/steam-proxy?q=${encodeURIComponent(q)}`,
+      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
+    )
     const data = await res.json()
-    return (data.results ?? []).map((g: any) => ({
-      id: String(g.id),
-      title: g.name,
-      image: g.background_image ?? null,
-      type: 'game' as const,
-      release_year: yearFrom(g.released),
-    }))
+    return (data.items ?? [])
+      .filter((g: any) => g.type === 'app')
+      .map((g: any) => ({
+        id: `steam-${g.id}`,
+        title: g.name,
+        image: `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.id}/header.jpg`,
+        type: 'game' as const,
+        release_year: null,
+      }))
   }
 
   if (category === 'artist') {
+    // TheAudioDB free key is deprecated; use iTunes Search (free, no key, CORS-friendly).
     const res = await fetch(
-      `https://www.theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(q)}`
+      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=musicArtist&limit=25`
     )
-    const data = await res.json().catch(() => ({}))
-    return (data.artists ?? []).map((a: any) => ({
-      id: `artist-${a.idArtist}`,
-      title: a.strArtist,
-      image: a.strArtistThumb ?? null,
-      type: 'artist' as const,
-      release_year: null,
-    }))
+    const data = await res.json()
+    return (data.results ?? [])
+      .filter((a: any) => a.wrapperType === 'artist')
+      .map((a: any) => ({
+        id: `itunes-${a.artistId}`,
+        title: a.artistName,
+        image: null,
+        type: 'artist' as const,
+        release_year: null,
+      }))
   }
 
   return []
@@ -610,6 +609,30 @@ export async function getBookVolumes(item: MediaItem): Promise<MediaItem[]> {
 }
 
 export async function getDiscography(artistId: string): Promise<MediaItem[]> {
+  // New iTunes artists (id prefix: itunes-)
+  if (artistId.startsWith('itunes-')) {
+    const id = artistId.replace('itunes-', '')
+    const res = await fetch(
+      `https://itunes.apple.com/lookup?id=${id}&entity=album&limit=100`
+    )
+    const data = await res.json()
+    return (data.results ?? [])
+      .filter((r: any) => r.wrapperType === 'collection' && r.collectionType === 'Album')
+      .sort((a: any, b: any) => {
+        const ya = a.releaseDate ? parseInt(a.releaseDate, 10) : 0
+        const yb = b.releaseDate ? parseInt(b.releaseDate, 10) : 0
+        return yb - ya
+      })
+      .map((r: any) => ({
+        id: `album-${r.collectionId}`,
+        title: `${r.collectionName} – ${r.artistName}`,
+        image: r.artworkUrl100?.replace('100x100bb', '300x300bb') ?? null,
+        type: 'album' as const,
+        release_year: r.releaseDate ? parseInt(r.releaseDate.split('-')[0], 10) : null,
+      }))
+  }
+
+  // Legacy TheAudioDB artists (id prefix: artist-)
   const id = artistId.replace('artist-', '')
   const res = await fetch(`https://www.theaudiodb.com/api/v1/json/2/album.php?i=${id}`)
   const data = await res.json().catch(() => ({}))
