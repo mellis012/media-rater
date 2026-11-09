@@ -17,6 +17,20 @@ export function useRatings() {
   ) => {
     setSaving(true)
     try {
+      // Remove any legacy entry for the same title+category with a different item_id
+      // so re-rating via a new API doesn't create a duplicate.
+      const { data: legacy } = await supabase
+        .from('ratings')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('category', category)
+        .eq('title', title)
+        .neq('item_id', itemId)
+        .maybeSingle()
+      if (legacy) {
+        await supabase.from('ratings').delete().eq('id', legacy.id)
+      }
+
       const { error } = await supabase.from('ratings').upsert(
         {
           user_id: userId,
@@ -92,11 +106,13 @@ export function useRatings() {
   const getUserRatingMap = useCallback(async (userId: string): Promise<Map<string, number>> => {
     const { data } = await supabase
       .from('ratings')
-      .select('category, item_id, rating')
+      .select('category, item_id, rating, title')
       .eq('user_id', userId)
     const map = new Map<string, number>()
     for (const r of data ?? []) {
       map.set(`${r.category}:${r.item_id}`, r.rating)
+      // Title-based fallback so old API IDs (rawg-, artist-, steam-) still show the badge
+      if (r.title) map.set(`${r.category}:title:${r.title.toLowerCase().trim()}`, r.rating)
     }
     return map
   }, [])

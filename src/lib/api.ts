@@ -88,7 +88,7 @@ export async function fetchReleaseYear(r: Rating): Promise<number | null> {
     }
 
     if (r.category === 'game') {
-      // RAWG is no longer available; steam IDs carry no release date at search time.
+      // IGDB results include release_year at search time; nothing to sync.
       return null
     }
 
@@ -442,21 +442,30 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
   }
 
   if (category === 'game') {
-    // RAWG is no longer available; use Steam store search via proxy.
     const res = await fetch(
-      `${SUPABASE_URL}/functions/v1/steam-proxy?q=${encodeURIComponent(q)}`,
-      { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
+      `${SUPABASE_URL}/functions/v1/igdb-proxy`,
+      {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ q }),
+      },
     )
     const data = await res.json()
-    return (data.items ?? [])
-      .filter((g: any) => g.type === 'app')
-      .map((g: any) => ({
-        id: `steam-${g.id}`,
-        title: g.name,
-        image: `https://cdn.cloudflare.steamstatic.com/steam/apps/${g.id}/header.jpg`,
-        type: 'game' as const,
-        release_year: null,
-      }))
+    return (Array.isArray(data) ? data : []).map((g: any) => ({
+      id: `igdb-${g.id}`,
+      title: g.name,
+      image: g.cover?.url
+        ? `https:${g.cover.url.replace('t_thumb', 't_cover_big')}`
+        : null,
+      type: 'game' as const,
+      release_year: g.first_release_date
+        ? new Date(g.first_release_date * 1000).getFullYear()
+        : null,
+    }))
   }
 
   if (category === 'artist') {

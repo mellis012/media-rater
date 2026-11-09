@@ -130,7 +130,10 @@ export default function SearchPage() {
                 key={item.id}
                 item={item}
                 userId={user?.id ?? null}
-                existingRating={ratingMap.get(`${item.type}:${item.id}`)}
+                existingRating={
+                  ratingMap.get(`${item.type}:${item.id}`) ??
+                  ratingMap.get(`${item.type}:title:${item.title.toLowerCase().trim()}`)
+                }
                 onRate={handleRate}
                 onDrill={handleDrill}
                 parentImage={drillParent?.image ?? null}
