@@ -455,12 +455,20 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       },
     )
     const data = await res.json()
-    // Sort: main games / remakes / remasters first; seasons, DLC, episodes last
-    const MAIN_CATEGORIES = new Set([0, 8, 9, 10]) // main_game, remake, remaster, expanded_game
+    // Sort so the most-relevant standalone game appears first.
+    // Primary key: how closely the name matches the query (exact < prefix < contains).
+    // Secondary key: name length (shorter = main entry, not a DLC/season/bundle).
+    const qLow = q.toLowerCase()
+    function matchScore(name: string): number {
+      const n = name.toLowerCase()
+      if (n === qLow) return 0
+      if (n.startsWith(qLow + ' ') || n.startsWith(qLow + ':') || n.startsWith(qLow + ',')) return 1
+      if (n.includes(qLow)) return 2
+      return 3
+    }
     const sorted = (Array.isArray(data) ? data : []).sort((a: any, b: any) => {
-      const aMain = MAIN_CATEGORIES.has(a.category ?? 0) ? 0 : 1
-      const bMain = MAIN_CATEGORIES.has(b.category ?? 0) ? 0 : 1
-      return aMain - bMain
+      const diff = matchScore(a.name) - matchScore(b.name)
+      return diff !== 0 ? diff : a.name.length - b.name.length
     })
     return sorted.map((g: any) => ({
       id: `igdb-${g.id}`,
