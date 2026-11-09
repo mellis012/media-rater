@@ -32,7 +32,7 @@ Deno.serve(async (req: Request) => {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'text/plain',
       },
-      body: `fields name,cover.url,first_release_date; search "${safeQ}"; limit 25;`,
+      body: `fields name,cover.url,first_release_date,category; search "${safeQ}"; limit 25;`,
     })
 
     const data = await res.json()

@@ -455,7 +455,14 @@ export async function searchMedia(q: string, category: string): Promise<MediaIte
       },
     )
     const data = await res.json()
-    return (Array.isArray(data) ? data : []).map((g: any) => ({
+    // Sort: main games / remakes / remasters first; seasons, DLC, episodes last
+    const MAIN_CATEGORIES = new Set([0, 8, 9, 10]) // main_game, remake, remaster, expanded_game
+    const sorted = (Array.isArray(data) ? data : []).sort((a: any, b: any) => {
+      const aMain = MAIN_CATEGORIES.has(a.category ?? 0) ? 0 : 1
+      const bMain = MAIN_CATEGORIES.has(b.category ?? 0) ? 0 : 1
+      return aMain - bMain
+    })
+    return sorted.map((g: any) => ({
       id: `igdb-${g.id}`,
       title: g.name,
       image: g.cover?.url
